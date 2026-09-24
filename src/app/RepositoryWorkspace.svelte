@@ -2546,13 +2546,13 @@
           type="button"
           class="gd-workbar"
           title="Open working changes"
-          aria-label={`${workBar.total} unstaged changes. Open working changes.`}
+          aria-label={`${workBar.total} uncommitted changes. Open working changes.`}
           onclick={() => changeInspector("working")}
         >
           <strong>{workBar.total} changed</strong>
           <span class="gd-workbar-stats">
             {#if workBar.added}<span class="gd-added">+{workBar.added} added</span>{/if}
-            {#if workBar.modified}<span>{workBar.modified} modified</span>{/if}
+            {#if workBar.modified}<span class="gd-modified">{workBar.modified} modified</span>{/if}
             {#if workBar.deleted}<span class="gd-deleted">−{workBar.deleted} deleted</span>{/if}
           </span>
           <span class="gd-workbar-go" aria-hidden="true">→</span>
@@ -2892,6 +2892,7 @@
   .gd-workbar {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: var(--gd-space-3);
     flex: 0 0 auto;
     min-height: 28px;
@@ -2908,8 +2909,9 @@
   .gd-workbar:focus-visible { outline: 2px solid var(--gd-focus); outline-offset: -2px; }
   .gd-workbar-stats { display: flex; gap: var(--gd-space-2); color: var(--gd-text-secondary); }
   .gd-workbar .gd-added { color: var(--gd-accent); }
+  .gd-workbar .gd-modified { color: var(--gd-warning); }
   .gd-workbar .gd-deleted { color: var(--gd-danger); }
-  .gd-workbar-go { margin-left: auto; color: var(--gd-text-secondary); }
+  .gd-workbar-go { color: var(--gd-text-secondary); }
   .gd-trust-bar {
     display: flex;
     align-items: center;

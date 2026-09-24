@@ -53,11 +53,21 @@ describe("summarizeWorkingChanges", () => {
     ).toEqual({ total: 3, added: 1, modified: 1, deleted: 1 });
   });
 
-  it("hides on null, clean, staged-only or conflicted listings", () => {
+  it("counts staged-only rows once, preferring the worktree side", () => {
+    expect(
+      summarizeWorkingChanges([
+        file({ displayPath: "both.txt", indexStatus: "M", worktreeStatus: "M" }),
+        file({ displayPath: "staged-add.txt", indexStatus: "A", worktreeStatus: " " }),
+        file({ displayPath: "staged-del.txt", indexStatus: "D", worktreeStatus: " " })
+      ])
+    ).toEqual({ total: 3, added: 1, modified: 1, deleted: 1 });
+  });
+
+  it("hides on null, clean or conflicted-only listings", () => {
     expect(summarizeWorkingChanges(null)).toBeNull();
     expect(summarizeWorkingChanges([])).toBeNull();
     expect(
-      summarizeWorkingChanges([file({ displayPath: "s.txt", indexStatus: "M", worktreeStatus: " " })])
+      summarizeWorkingChanges([file({ displayPath: "clean.txt", indexStatus: " ", worktreeStatus: " " })])
     ).toBeNull();
     expect(
       summarizeWorkingChanges([

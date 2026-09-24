@@ -29,18 +29,25 @@ export interface WorkingSummary {
 }
 
 /**
- * One-line summary of the unstaged worktree for the main-panel bar.
- * Conflicted rows belong to the conflict flow; null/empty hides the bar.
+ * One-line summary of all uncommitted changes for the main-panel bar: every
+ * non-conflicted file with a staged or unstaged change, counted once.
+ * A file staged and edited again classifies by its worktree side.
+ * Null/empty/clean/conflicted-only hides the bar.
  */
 export function summarizeWorkingChanges(files: ChangedFile[] | null): WorkingSummary | null {
   if (!files) return null;
-  const rows = files.filter((f) => !f.conflicted && !NOT_UNSTAGED.has(f.worktreeStatus));
+  const rows = files.filter(
+    (f) =>
+      !f.conflicted &&
+      (!NOT_UNSTAGED.has(f.worktreeStatus) || !NOT_STAGED.has(f.indexStatus))
+  );
   if (rows.length === 0) return null;
   let added = 0;
   let deleted = 0;
   for (const row of rows) {
-    if (row.worktreeStatus === "?" || row.worktreeStatus === "A") added += 1;
-    else if (row.worktreeStatus === "D") deleted += 1;
+    const side = !NOT_UNSTAGED.has(row.worktreeStatus) ? row.worktreeStatus : row.indexStatus;
+    if (side === "?" || side === "A") added += 1;
+    else if (side === "D") deleted += 1;
   }
   return { total: rows.length, added, deleted, modified: rows.length - added - deleted };
 }
