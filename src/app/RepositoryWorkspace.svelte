@@ -1722,8 +1722,20 @@
         } else {
           // Remote checkout creates a local tracking branch and switches to
           // it (`git switch -c`); dirty worktrees go through the stash offer
-          // inside switchBranch. Never the generic Branches modal.
-          await switchBranch(ref.refId, suggestedTrackName(ref.label));
+          // inside switchBranch.
+          const name = suggestedTrackName(ref.label);
+          const localExists = refs.some((r) => r.kind === "local" && r.label === name);
+          if (!localExists) {
+            await switchBranch(ref.refId, name);
+          } else {
+            // The default name is taken locally (`git switch -c` would
+            // refuse): open Branches prefilled so the user picks another
+            // local name and Tracks that row instead.
+            trackName = name;
+            branchError = null;
+            deleteConfirm = null;
+            showBranches = true;
+          }
         }
         return;
       case "merge":

@@ -83,7 +83,6 @@
     </section>
   {:else}<div class="gd-empty"><strong>Explore a commit</strong><p>Select a row in history to see its message, author and changed files.</p></div>{/if}
 </div>
-<footer class="gd-details-footer"><button onclick={onBack}>← Back to working changes</button></footer>
 {#if fileMenu}<ContextMenu x={fileMenu.x} y={fileMenu.y} items={fileMenuItems(fileMenu.file)}
   label={`File actions for ${fileMenu.file.path}`} onClose={() => (fileMenu = null)} />{/if}
 

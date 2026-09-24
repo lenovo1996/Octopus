@@ -257,8 +257,6 @@
   {:else if abortReason}
     <p class="gd-muted">{abortReason}</p>
   {/if}
-
-  <button type="button" class="gd-back" onclick={onBack}>Back to working changes</button>
 </div>
 
 <style>

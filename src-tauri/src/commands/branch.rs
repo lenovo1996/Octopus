@@ -1549,6 +1549,24 @@ mod tests {
         .expect_err("dirty remote checkout");
         assert_eq!(err.code, crate::domain::ErrorCode::DIRTY_WORKTREE);
         assert_eq!(head_branch(&repo), "main");
+
+        // A tracking name that already exists locally fails closed: git
+        // refuses `switch -c` and HEAD never moves. The UI checks this first
+        // and asks for another name instead.
+        std::fs::remove_file(repo.join("dirty.txt")).expect("clean up");
+        let version = registry.get(&repo_id).expect("session").version;
+        let err = core_branch_switch(
+            &runner,
+            &mut registry,
+            &repo_id,
+            version,
+            &other.ref_id,
+            Some("main"),
+        )
+        .await
+        .expect_err("duplicate tracking name");
+        assert_eq!(err.code, crate::domain::ErrorCode::GIT_ERROR);
+        assert_eq!(head_branch(&repo), "main");
     }
 
     #[tokio::test]
