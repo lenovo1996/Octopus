@@ -54,6 +54,7 @@
     StashEntry
   } from "../lib/ipc/types";
   import { collectDiscardAllTargets, discardAllSummary } from "../lib/status/discard-all";
+  import { summarizeWorkingChanges } from "../lib/status/partition";
   import { suggestedTrackName } from "../lib/refs/filter";
   import { SearchController } from "../lib/search/controller";
   import { clampWidth, initialShell, SHELL_LIMITS, type InspectorState } from "../lib/state/shell";
@@ -111,6 +112,8 @@
   // Worktree status (T07). Null rows = never loaded; errors keep stale rows
   // when a previous listing exists, so a failed refresh never blanks the UI.
   let statusFiles: ChangedFile[] | null = $state(null);
+  // Main-panel bar: one-line unstaged summary, hidden when the tree is clean.
+  const workBar = $derived(summarizeWorkingChanges(statusFiles));
   let statusLoading = $state(false);
   let statusError: AppError | null = $state(null);
   let unlistenInvalidated: (() => void) | null = null;
@@ -2522,6 +2525,7 @@
       <Sidebar
         width={shell.sidebarWidth}
         {refs}
+        starScope={session.workspaceKey}
         activeSection={section}
         {activeRefId}
         actionsDisabled={busy || branchBusy || session?.trust !== "trusted"}
@@ -2537,6 +2541,23 @@
       />
       <main class="gd-main" aria-label="Main panel">
       <div class="gd-history-slot" hidden={diff.selection !== null}>
+      {#if workBar}
+        <button
+          type="button"
+          class="gd-workbar"
+          title="Open working changes"
+          aria-label={`${workBar.total} unstaged changes. Open working changes.`}
+          onclick={() => changeInspector("working")}
+        >
+          <strong>{workBar.total} changed</strong>
+          <span class="gd-workbar-stats">
+            {#if workBar.added}<span class="gd-added">+{workBar.added} added</span>{/if}
+            {#if workBar.modified}<span>{workBar.modified} modified</span>{/if}
+            {#if workBar.deleted}<span class="gd-deleted">−{workBar.deleted} deleted</span>{/if}
+          </span>
+          <span class="gd-workbar-go" aria-hidden="true">→</span>
+        </button>
+      {/if}
       <HistoryPane
         rows={historyRows}
         laid={laidRows}
@@ -2866,8 +2887,29 @@
     min-height: 0;
     overflow: hidden;
   }
-  .gd-history-slot { display: flex; height: 100%; }
+  .gd-history-slot { display: flex; flex-direction: column; height: 100%; }
   .gd-history-slot[hidden] { display: none; }
+  .gd-workbar {
+    display: flex;
+    align-items: center;
+    gap: var(--gd-space-3);
+    flex: 0 0 auto;
+    min-height: 28px;
+    padding: 4px var(--gd-space-3);
+    color: var(--gd-text);
+    background: var(--gd-surface-raised);
+    border: 0;
+    border-bottom: 1px solid var(--gd-border);
+    cursor: pointer;
+    font-size: var(--gd-font-size-small);
+    text-align: left;
+  }
+  .gd-workbar:hover { background: var(--gd-surface-hover); }
+  .gd-workbar:focus-visible { outline: 2px solid var(--gd-focus); outline-offset: -2px; }
+  .gd-workbar-stats { display: flex; gap: var(--gd-space-2); color: var(--gd-text-secondary); }
+  .gd-workbar .gd-added { color: var(--gd-accent); }
+  .gd-workbar .gd-deleted { color: var(--gd-danger); }
+  .gd-workbar-go { margin-left: auto; color: var(--gd-text-secondary); }
   .gd-trust-bar {
     display: flex;
     align-items: center;

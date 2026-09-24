@@ -2,6 +2,7 @@
   const summaryId = $props.id();
   import type { AppError, ChangedFile, DiffTarget } from "../ipc/types";
   import { partitionStatus } from "../status/partition";
+  import { neighborRowIndex } from "./file-row-nav";
   import FileChangeRow from "./FileChangeRow.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import { pointFromContextEvent, type ContextMenuItem } from "../context-menu/model";
@@ -34,6 +35,26 @@
     const point = pointFromContextEvent(event);
     fileMenu = { file, side, x:point.left, y:point.top };
   }
+  let workContent: HTMLElement | undefined = $state(undefined);
+
+  /** ArrowUp/Down (+Home/End) activate the neighbouring file row in visual
+   * order, spanning Unstaged and Staged: focus moves and its diff opens,
+   * exactly like clicking (or Enter on) the row. Only acts when focus is
+   * already on a row; inputs in the commit editor keep their native keys. */
+  function fileListKey(event: KeyboardEvent): void {
+    const target = event.target as HTMLElement | null;
+    const row = target?.closest?.(".gd-file-row") as HTMLElement | null;
+    if (!row || !workContent) return;
+    const rows = [...workContent.querySelectorAll(".gd-file-row")];
+    const next = neighborRowIndex(rows.length, rows.indexOf(row), event.key);
+    if (next === null) return;
+    event.preventDefault();
+    const opener = rows[next].querySelector<HTMLElement>(".gd-file");
+    if (!opener) return;
+    opener.focus();
+    opener.click();
+  }
+
   function fileMenuItems(file: ChangedFile, side: FileSide): ContextMenuItem[] {
     const action = side === "worktree" ? onStage : onUnstage;
     const items: ContextMenuItem[] = [
@@ -52,7 +73,8 @@
   }
 </script>
 
-<div class="gd-work-content">
+<!-- svelte-ignore a11y_no_static_element_interactions: keydown only delegates ArrowUp/Down/Home/End from an already-focused row button; the div itself takes no interaction -->
+<div class="gd-work-content" bind:this={workContent} onkeydown={fileListKey}>
   <div class="gd-status-bar">
     <p class="gd-work-summary" title={branchName}><strong>{files === null ? "Reading changes…" : `${files.length} changed`}</strong><span>{branchName}</span>{#if loading && files !== null}<em>Refreshing…</em>{/if}</p>
     <button class="gd-refresh" onclick={onRefresh} disabled={loading} aria-label="Refresh working changes" title="Refresh working changes">

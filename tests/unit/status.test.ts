@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mockAdapter } from "../../src/lib/ipc/mock";
-import { partitionStatus } from "../../src/lib/status/partition";
+import { partitionStatus, summarizeWorkingChanges } from "../../src/lib/status/partition";
 import type { ChangedFile } from "../../src/lib/ipc/types";
 
 function file(overrides: Partial<ChangedFile> & { displayPath: string }): ChangedFile {
@@ -39,6 +39,31 @@ describe("partitionStatus", () => {
     expect(staged).toHaveLength(1);
     expect(unstaged).toHaveLength(1);
     expect(staged[0].conflicted).toBe(true);
+  });
+});
+
+describe("summarizeWorkingChanges", () => {
+  it("breaks unstaged rows into added/modified/deleted", () => {
+    expect(
+      summarizeWorkingChanges([
+        file({ displayPath: "new.txt", worktreeStatus: "?" }),
+        file({ displayPath: "edit.txt", worktreeStatus: "M" }),
+        file({ displayPath: "gone.txt", worktreeStatus: "D" })
+      ])
+    ).toEqual({ total: 3, added: 1, modified: 1, deleted: 1 });
+  });
+
+  it("hides on null, clean, staged-only or conflicted listings", () => {
+    expect(summarizeWorkingChanges(null)).toBeNull();
+    expect(summarizeWorkingChanges([])).toBeNull();
+    expect(
+      summarizeWorkingChanges([file({ displayPath: "s.txt", indexStatus: "M", worktreeStatus: " " })])
+    ).toBeNull();
+    expect(
+      summarizeWorkingChanges([
+        file({ displayPath: "c.txt", indexStatus: "U", worktreeStatus: "U", conflicted: true })
+      ])
+    ).toBeNull();
   });
 });
 

@@ -14,6 +14,8 @@
     type ContextMenuItem
   } from "../context-menu/model";
   import { filterRefs, isRefsSectionOpen } from "../refs/filter";
+  import { loadStarred, saveStarred, sortStarred } from "../refs/starred";
+  import { windowRows } from "../graph/layout";
   import {
     buildBranchMenuItems,
     type BranchMenuAction
@@ -22,6 +24,8 @@
   interface Props {
     width: number;
     refs: RefItem[];
+    /** Stable per-repository scope for starred-branch persistence. */
+    starScope: string;
     activeSection: string;
     activeRefId: string | null;
     actionsDisabled: boolean;
@@ -34,6 +38,7 @@
   let {
     width,
     refs,
+    starScope,
     activeSection,
     activeRefId,
     actionsDisabled,
@@ -55,10 +60,54 @@
   let collapsedLocal = $state(false);
   let collapsedRemote = $state(false);
 
-  const shownLocal = $derived(filterRefs(localRefs, query));
-  const shownRemote = $derived(filterRefs(remoteRefs, query));
+  // Starred branches pin to the top of Local/Remote; persisted per repo.
+  let starred: string[] = $state([]);
+  $effect(() => {
+    starred = loadStarred(starScope);
+  });
+  const starredSet = $derived(new Set(starred));
+
+  function toggleStar(refId: string): void {
+    const next = starred.includes(refId)
+      ? starred.filter((id) => id !== refId)
+      : [...starred, refId];
+    starred = next;
+    saveStarred(starScope, next);
+  }
+
+  const shownLocal = $derived(sortStarred(filterRefs(localRefs, query), starredSet));
+  const shownRemote = $derived(sortStarred(filterRefs(remoteRefs, query), starredSet));
   const shownTag = $derived(filterRefs(tagRefs, query));
   const filtering = $derived(query.trim() !== "");
+
+  // Long branch lists render only the visible window (fixed 28px rows, same
+  // windowing helper as the history graph) so thousands of refs stay fast.
+  const REF_ROW_HEIGHT = 28;
+  const REF_OVERSCAN = 8;
+  const REF_VIEWPORT = 240;
+  let localList: HTMLElement | undefined = $state(undefined);
+  let remoteList: HTMLElement | undefined = $state(undefined);
+  let localScrollTop = $state(0);
+  let remoteScrollTop = $state(0);
+  // A new filter or collapse changes the listing: restart from the top.
+  $effect(() => {
+    query;
+    collapsedLocal;
+    if (localList) localList.scrollTop = 0;
+    localScrollTop = 0;
+  });
+  $effect(() => {
+    query;
+    collapsedRemote;
+    if (remoteList) remoteList.scrollTop = 0;
+    remoteScrollTop = 0;
+  });
+  const localWindow = $derived(
+    windowRows(shownLocal, localScrollTop, REF_VIEWPORT, REF_ROW_HEIGHT, REF_OVERSCAN)
+  );
+  const remoteWindow = $derived(
+    windowRows(shownRemote, remoteScrollTop, REF_VIEWPORT, REF_ROW_HEIGHT, REF_OVERSCAN)
+  );
 
   function refTitle(ref: RefItem): string {
     const parts = [ref.fullName, ref.oid.slice(0, 7)];
@@ -90,8 +139,27 @@
   }
 </script>
 
-{#snippet refRow(ref: RefItem)}
-  <li>
+{#snippet refRow(ref: RefItem, starrable: boolean)}
+  {@const isStarred = starrable && starredSet.has(ref.refId)}
+  <li class="gd-ref-row">
+    <span class="gd-ref-icon" class:starred={isStarred}>
+      <span class="gd-kind" aria-hidden="true">{ref.kind === "local" ? "⑂" : ref.kind === "remote" ? "☁" : "⚑"}</span>
+      {#if starrable}
+        <button
+          type="button"
+          class="gd-star"
+          aria-pressed={isStarred}
+          aria-label={`${isStarred ? "Unstar" : "Star"} branch ${ref.label}`}
+          title={isStarred ? `Unstar ${ref.label}` : `Star ${ref.label} to pin it to the top`}
+          onclick={(event) => {
+            event.stopPropagation();
+            toggleStar(ref.refId);
+          }}
+        >
+          <span aria-hidden="true">{isStarred ? "★" : "☆"}</span>
+        </button>
+      {/if}
+    </span>
     <button
       type="button"
       class="gd-ref"
@@ -102,8 +170,7 @@
       oncontextmenu={(event) => openRefMenu(event, ref)}
       onkeydown={(event) => refMenuKey(event, ref)}
     >
-      <span aria-hidden="true">{ref.kind === "local" ? "⑂" : ref.kind === "remote" ? "☁" : "⚑"}</span>
-      {ref.label}{ref.current ? " •" : ""}
+      <span class="gd-ref-label">{ref.label}{ref.current ? " •" : ""}</span>
     </button>
   </li>
 {/snippet}
@@ -147,9 +214,10 @@
           {/if}
         </button>
         {#if isRefsSectionOpen(collapsedLocal, filtering)}
-        <ul class="gd-refs">
-          {#each shownLocal as ref (ref.refId)}
-            {@render refRow(ref)}
+        <ul class="gd-refs" bind:this={localList} onscroll={(e) => (localScrollTop = e.currentTarget.scrollTop)}>
+          <li class="gd-spacer" aria-hidden="true" style={`height: ${localWindow.start * REF_ROW_HEIGHT}px`}></li>
+          {#each shownLocal.slice(localWindow.start, localWindow.end) as ref (ref.refId)}
+            {@render refRow(ref, true)}
           {:else}
             <li>
               <span class="gd-ref gd-empty">
@@ -157,6 +225,7 @@
               </span>
             </li>
           {/each}
+          <li class="gd-spacer" aria-hidden="true" style={`height: ${(shownLocal.length - localWindow.end) * REF_ROW_HEIGHT}px`}></li>
         </ul>
         {/if}
       </li>
@@ -176,9 +245,10 @@
           {/if}
         </button>
         {#if isRefsSectionOpen(collapsedRemote, filtering)}
-        <ul class="gd-refs">
-          {#each shownRemote as ref (ref.refId)}
-            {@render refRow(ref)}
+        <ul class="gd-refs" bind:this={remoteList} onscroll={(e) => (remoteScrollTop = e.currentTarget.scrollTop)}>
+          <li class="gd-spacer" aria-hidden="true" style={`height: ${remoteWindow.start * REF_ROW_HEIGHT}px`}></li>
+          {#each shownRemote.slice(remoteWindow.start, remoteWindow.end) as ref (ref.refId)}
+            {@render refRow(ref, true)}
           {:else}
             <li>
               <span class="gd-ref gd-empty">
@@ -186,6 +256,7 @@
               </span>
             </li>
           {/each}
+          <li class="gd-spacer" aria-hidden="true" style={`height: ${(shownRemote.length - remoteWindow.end) * REF_ROW_HEIGHT}px`}></li>
         </ul>
         {/if}
       </li>
@@ -206,7 +277,7 @@
         {#if activeSection === "tags"}
           <ul class="gd-refs">
             {#each shownTag as ref (ref.refId)}
-              {@render refRow(ref)}
+              {@render refRow(ref, false)}
             {:else}
               <li>
                 <span class="gd-ref gd-empty">
@@ -322,6 +393,62 @@
     max-height: 240px;
     overflow-y: auto;
     overflow-x: hidden;
+  }
+  .gd-ref-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    overflow: hidden;
+  }
+  .gd-ref-row .gd-ref {
+    flex: 1;
+    min-width: 0;
+  }
+  .gd-ref-label {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .gd-spacer {
+    list-style: none;
+    padding: 0;
+  }
+  .gd-ref-icon {
+    position: relative;
+    flex: 0 0 1.2em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .gd-star {
+    position: absolute;
+    inset: -4px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: var(--gd-warning);
+    background: transparent;
+    border: 0;
+    border-radius: var(--gd-radius-control);
+    cursor: pointer;
+    font-size: var(--gd-font-size-small);
+    opacity: 0;
+  }
+  .gd-ref-icon.starred .gd-kind,
+  .gd-ref-row:hover .gd-kind {
+    opacity: 0;
+  }
+  .gd-ref-icon.starred .gd-star,
+  .gd-ref-row:hover .gd-star,
+  .gd-star:focus-visible {
+    opacity: 1;
+  }
+  .gd-star:focus-visible {
+    outline: 2px solid var(--gd-focus);
+    outline-offset: 1px;
   }
   .gd-chevron {
     display: inline-block;
