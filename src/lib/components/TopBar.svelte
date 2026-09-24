@@ -1,7 +1,10 @@
 <script lang="ts">
   // Topbar: repo switcher, branch picker, search, identity popover, menu.
   // Open/init (T03) and history search (T06) are live; identity/menu (T14)
-  // are read-only popovers over live IPC state.
+  // are read-only popovers over live IPC state. Primary Git actions render
+  // centered via the `actions` snippet.
+  import type { Snippet } from "svelte";
+
   interface Props {
     demo: boolean;
     branch: string;
@@ -16,6 +19,7 @@
     onOpenSettings: () => void;
     onOpenHelp: () => void;
     repoName: string;
+    actions?: Snippet;
   }
 
   let {
@@ -31,7 +35,8 @@
     onBranches,
     onOpenSettings,
     onOpenHelp,
-    repoName
+    repoName,
+    actions
   }: Props = $props();
   let searchEl: HTMLInputElement | undefined = $state(undefined);
   let showIdentity = $state(false);
@@ -58,6 +63,9 @@
     <button type="button" class="gd-btn gd-branch" title="Current HEAD · manage branches" onclick={onBranches}>
       {branch} ▾
     </button>
+  </div>
+  <div class="gd-topbar-center">
+    {#if actions}{@render actions()}{/if}
   </div>
   <div class="gd-topbar-right">
     <input
@@ -163,6 +171,18 @@
     align-items: center;
     gap: var(--gd-space-2);
     min-width: 0;
+    flex: 1 1 0;
+  }
+  .gd-topbar-right {
+    justify-content: flex-end;
+  }
+  .gd-topbar-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-x: auto;
   }
   .gd-btn {
     padding: 5px 10px;

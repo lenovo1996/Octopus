@@ -91,8 +91,8 @@
     onLoadMore
   }: Props = $props();
 
-  const rowHeight = 32;
-  const headerHeight = 32;
+  const rowHeight = 28;
+  const headerHeight = 28;
   const laneWidth = 20;
   const overscan = 8;
   let scrollTop = $state(0);
@@ -313,19 +313,6 @@
 </script>
 
 <section class="gd-history" aria-label="Commit history" style={`--history-width: ${tableWidth}px; --history-columns: ${columnTemplate}`}>
-  <div class="gd-history-bar">
-    <label class="gd-scope"><span>History</span>
-      <select value={scopeValue} aria-label="History scope" onchange={(e) => onScopeChange(e.currentTarget.value)}>
-        {#each scopeOptions as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
-      </select>
-    </label>
-    {#if searchActive}
-      <span class="gd-search-hint" role="status">{searchRows.length} results for “{searchQuery}”{#if searchIncomplete} · first matches{/if}</span>
-      <button class="gd-clear" onclick={onClearSearch}>Clear</button>
-    {:else}
-      <span class="gd-total">{totalHint}{#if pageTruncated} · older history omitted{/if}</span>
-    {/if}
-  </div>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions: keyboard navigation in virtual commit list -->
   <div class="gd-viewport" role="region" aria-label="Scrollable commit history"
     onscroll={onScroll} onkeydown={onViewportKeyDown} tabindex="0" bind:clientHeight={viewportHeight} bind:clientWidth={viewportWidth} bind:this={viewportEl}>
@@ -449,7 +436,7 @@
   .gd-clear, .gd-show-graph, .gd-state button { background: var(--gd-panel); color: var(--gd-accent); border: 1px solid var(--gd-border); border-radius: 4px; padding: 4px 8px; cursor: pointer; font: inherit; }
   .gd-clear { margin-left: auto; }
   .gd-history-header, .gd-commit-row { display: grid; grid-template-columns: var(--history-columns); width: var(--history-width); }
-  .gd-history-header { position: sticky; top: 0; z-index: 3; height: 32px; background: var(--gd-panel); border-bottom: 1px solid var(--gd-border); color: var(--gd-text-secondary); font-size: var(--gd-font-size-small); }
+  .gd-history-header { position: sticky; top: 0; z-index: 3; height: 28px; background: var(--gd-panel); border-bottom: 1px solid var(--gd-border); color: var(--gd-text-secondary); font-size: var(--gd-font-size-small); }
   .gd-column-head { position: relative; display: flex; align-items: center; min-width: 0; }
   .gd-column-head > span { padding-left: 12px; }
   .gd-graph-head { flex-direction: column; align-items: stretch; justify-content: space-between; }
@@ -464,11 +451,11 @@
   .gd-viewport::-webkit-scrollbar-corner { background: var(--gd-panel); }
   .gd-list-row { position: relative; width: var(--history-width); }
   .gd-list-row.contexted .gd-commit-row { background: var(--gd-surface-hover); box-shadow: inset 3px 0 var(--gd-focus), inset 0 -1px color-mix(in srgb, var(--gd-border) 45%, transparent); }
-  .gd-commit-row { align-items: center; height: 32px; padding: 0; color: var(--gd-text); background: transparent; border: 0; box-shadow: inset 0 -1px color-mix(in srgb, var(--gd-border) 45%, transparent); text-align: left; font: inherit; cursor: pointer; }
+  .gd-commit-row { align-items: center; height: 28px; padding: 0; color: var(--gd-text); background: transparent; border: 0; box-shadow: inset 0 -1px color-mix(in srgb, var(--gd-border) 45%, transparent); text-align: left; font: inherit; cursor: pointer; }
   .gd-commit-row:hover { background: var(--gd-surface-hover); }
   .gd-commit-row.selected { background: var(--gd-surface-selected); }
   .gd-commit-row.focused, button:focus-visible, .gd-viewport:focus-visible, select:focus-visible { outline: 2px solid var(--gd-focus); outline-offset: -2px; }
-  .gd-branches { display: flex; flex-direction: column; justify-content: center; gap: 1px; height: 32px; min-width: 0; padding: 1px 10px; }
+  .gd-branches { display: flex; flex-direction: column; justify-content: center; gap: 1px; height: 28px; min-width: 0; padding: 1px 8px; }
   .gd-ref-badge { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--gd-accent); font-size: 11px; line-height: 14px; }
   .gd-ref-badge.remote { color: var(--gd-lane-2); }
   .gd-ref-badge.tag { color: var(--gd-warning); }
@@ -476,7 +463,7 @@
   .gd-ref-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
   .gd-ref-extra { color: var(--gd-text-secondary); margin-left: auto; }
   .gd-graph { display: block; }
-  .gd-graph-clip { display: block; min-width: 0; height: 32px; overflow: hidden; }
+  .gd-graph-clip { display: block; min-width: 0; height: 28px; overflow: hidden; }
   .gd-subject { min-width: 0; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gd-author { display: flex; flex-direction: column; min-width: 0; padding: 0 12px; color: var(--gd-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--gd-font-size-small); line-height: 14px; }
   .gd-author small { font: 10px/12px var(--gd-font-code); opacity: .75; }

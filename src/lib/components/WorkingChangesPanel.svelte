@@ -110,7 +110,7 @@
   label={`File actions for ${fileMenu.file.displayPath}`} onClose={() => (fileMenu = null)} />{/if}
 
 <style>
-  .gd-work-content { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px 16px; }
+  .gd-work-content { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 8px 12px; }
   .gd-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; margin-bottom: 14px; padding: 4px 4px 10px; border-bottom: 1px solid var(--gd-border); }
   .gd-refresh { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; height: 28px; padding: 0 8px; border: 1px solid var(--gd-border); background: transparent; color: var(--gd-text-secondary); border-radius: 4px; cursor: pointer; font: 11px var(--gd-font-ui); }
   .gd-refresh:not(:disabled):hover { color: var(--gd-text); background: var(--gd-surface-hover); border-color: color-mix(in srgb, var(--gd-border) 60%, var(--gd-text-secondary)); }
@@ -118,7 +118,7 @@
   .gd-work-summary strong { color: var(--gd-text); font-size: 12px; font-weight: 620; }
   .gd-work-summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gd-work-summary em { color: var(--gd-accent); font-style: normal; }
-  .gd-file-group { margin-bottom: 20px; }
+  .gd-file-group { margin-bottom: 14px; }
   .gd-group-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 8px; border-bottom: 1px solid var(--gd-border); margin-bottom: 4px; }
   h3 { margin: 0; font-size: 12px; font-weight: 600; }
   h3 span { margin-left: 7px; padding: 1px 5px; background: var(--gd-surface-raised); color: var(--gd-text-secondary); border-radius: 3px; font-size: 10px; }
@@ -134,11 +134,11 @@
   .gd-error, .gd-notice { padding: 10px; background: var(--gd-canvas); border-left: 2px solid var(--gd-danger); color: var(--gd-danger); font-size: 12px; line-height: 1.5; }
   .gd-error p { margin: 0; }
   .gd-notice { border-color: var(--gd-warning); color: var(--gd-warning); }
-  .gd-commit-editor { flex: 0 0 auto; padding: 14px 16px; border-top: 1px solid var(--gd-border); background: color-mix(in srgb, var(--gd-panel) 65%, var(--gd-canvas)); }
+  .gd-commit-editor { flex: 0 0 auto; padding: 10px 12px; border-top: 1px solid var(--gd-border); background: color-mix(in srgb, var(--gd-panel) 65%, var(--gd-canvas)); }
   .gd-editor-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
   .gd-editor-heading>span, .gd-commit-hint { color: var(--gd-text-secondary); font-size: 10px; }
   label { display: block; color: var(--gd-text-secondary); font-size: 11px; margin-bottom: 6px; }
-  input, textarea { width: 100%; background: var(--gd-canvas); color: var(--gd-text); border: 1px solid var(--gd-border); border-radius: 4px; padding: 9px 10px; font: 12px/1.4 var(--gd-font-ui); }
+  input, textarea { width: 100%; background: var(--gd-canvas); color: var(--gd-text); border: 1px solid var(--gd-border); border-radius: 4px; padding: 7px 8px; font: var(--gd-font-size-small)/1.4 var(--gd-font-ui); }
   textarea { resize: vertical; min-height: 64px; max-height: 140px; margin-top: 8px; }
   details { margin-top: 10px; font-size: 11px; color: var(--gd-text-secondary); }
   summary { cursor: pointer; }

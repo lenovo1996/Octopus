@@ -1,6 +1,7 @@
 <script lang="ts">
-  // GitToolbar: primary Git actions. Branch opens the T10 dialog; Fetch /
-  // Pull / Push run T11 background jobs. Stash stays a disabled shell (T12).
+  // GitToolbar: sync error/log panels only. Action buttons live in GitActions
+  // (centered in the TopBar) with per-button job spinners. Props stay wide so
+  // existing fixtures keep compiling.
   import type { OperationLogEntry } from "../ipc/types";
 
   interface Props {
@@ -32,20 +33,7 @@
   }
 
   let {
-    onBranches,
-    remoteLabel,
-    remoteTitle,
-    syncDisabled,
-    syncDisabledReason,
     jobActive,
-    jobLabel,
-    jobProgress,
-    onFetch,
-    onPull,
-    onPush,
-    onMerge,
-    onStash,
-    onCancel,
     syncError,
     syncErrorCode,
     syncRetryLabel,
@@ -53,110 +41,12 @@
     bitbucketAvailable,
     onConnectBitbucket,
     logOpen,
-    onToggleLog,
     logLoading,
     logEntries,
     logError
   }: Props = $props();
-
-  const stashHint =
-    "Open the stash dialog (save, apply, pop). Stash needs a trusted repository.";
 </script>
 
-<div class="gd-toolbar" role="toolbar" aria-label="Git actions">
-  <button type="button" class="gd-tool gd-tool-live" onclick={onBranches} title="Create, switch, and delete branches">
-    Branch
-  </button>
-  <button
-    type="button"
-    class="gd-tool gd-tool-live"
-    disabled={syncDisabled || jobActive}
-    title={syncDisabled ? syncDisabledReason : "Fetch from the upstream remote (background job)"}
-    onclick={onFetch}
-  >
-    Fetch
-  </button>
-  <button
-    type="button"
-    class="gd-tool gd-tool-live"
-    disabled={syncDisabled || jobActive}
-    title={syncDisabled ? syncDisabledReason : "Fast-forward pull from the upstream remote"}
-    onclick={onPull}
-  >
-    Pull
-  </button>
-  <button
-    type="button"
-    class="gd-tool gd-tool-live"
-    disabled={syncDisabled || jobActive}
-    title={syncDisabled ? syncDisabledReason : "Push HEAD to the upstream remote (never force)"}
-    onclick={onPush}
-  >
-    Push
-  </button>
-  <button
-    type="button"
-    class="gd-tool gd-tool-live"
-    disabled={syncDisabled || jobActive}
-    title={syncDisabled
-      ? syncDisabledReason
-      : jobActive
-        ? "Wait for the running job first"
-        : "Merge a branch with a review stop (never fast-forwards silently)"}
-    onclick={onMerge}
-  >
-    Merge
-  </button>
-  <button
-    type="button"
-    class="gd-tool gd-tool-live"
-    disabled={syncDisabled}
-    title={syncDisabled ? syncDisabledReason : "Stash working changes (tracked-only by default)"}
-    onclick={onStash}
-  >
-    Stash
-  </button>
-  <button
-    type="button"
-    class="gd-tool gd-tool-live"
-    disabled={syncDisabled}
-    title={syncDisabled ? syncDisabledReason : stashHint}
-    onclick={onStash}
-  >
-    Pop stash
-  </button>
-  <span class="gd-remote" title={remoteTitle} role="status">
-    {remoteLabel ?? "No upstream"}
-  </span>
-  {#if bitbucketAvailable}
-    <button
-      type="button"
-      class="gd-tool gd-tool-live gd-bitbucket"
-      onclick={onConnectBitbucket}
-      disabled={jobActive}
-      title="Connect or replace the Bitbucket Cloud API token"
-    >
-      Bitbucket auth
-    </button>
-  {/if}
-  {#if jobActive}
-    <span class="gd-job" role="status">
-      {jobLabel}{jobProgress === null ? "…" : ` ${jobProgress}%`}
-    </span>
-    <button type="button" class="gd-tool gd-tool-live" onclick={onCancel} title="Ask the running job to stop">
-      Cancel
-    </button>
-  {/if}
-  <button
-    type="button"
-    class="gd-tool gd-tool-live gd-log-toggle"
-    onclick={onToggleLog}
-    aria-expanded={logOpen}
-    title="Show the redacted operation log for this repository"
-  >
-    {logOpen ? "Hide log" : "Sync log"}
-  </button>
-</div>
 {#if syncError}
   <div class="gd-sync-error" role="alert">
     <div>
@@ -194,57 +84,6 @@
 {/if}
 
 <style>
-  .gd-toolbar {
-    display: flex;
-    align-items: center;
-    gap: var(--gd-space-1);
-    height: var(--gd-toolbar-height);
-    padding: 0 var(--gd-space-3);
-    background: var(--gd-panel);
-    border-bottom: 1px solid var(--gd-border);
-    flex: 0 0 auto;
-    overflow: hidden;
-  }
-  .gd-tool {
-    padding: 5px 12px;
-    color: var(--gd-text-secondary);
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--gd-radius-control);
-    font-size: var(--gd-font-size);
-    white-space: nowrap;
-    cursor: not-allowed;
-  }
-  .gd-tool:disabled {
-    opacity: 0.75;
-  }
-  .gd-tool-live {
-    cursor: pointer;
-    color: var(--gd-text);
-  }
-  .gd-tool-live:disabled {
-    cursor: not-allowed;
-  }
-  .gd-remote {
-    margin-left: auto;
-    font-size: var(--gd-font-size-small);
-    color: var(--gd-text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .gd-job {
-    font-size: var(--gd-font-size-small);
-    color: var(--gd-text);
-    white-space: nowrap;
-  }
-  .gd-log-toggle {
-    margin-left: var(--gd-space-1);
-  }
-  .gd-bitbucket {
-    color: var(--gd-accent);
-    border-color: color-mix(in srgb, var(--gd-accent) 35%, var(--gd-border));
-  }
   .gd-sync-error {
     display: flex;
     align-items: center;

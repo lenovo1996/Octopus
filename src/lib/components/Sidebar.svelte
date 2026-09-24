@@ -288,7 +288,7 @@
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    padding: 7px 10px;
+    padding: 5px 8px;
     color: var(--gd-text);
     background: transparent;
     border: 0;
@@ -348,7 +348,7 @@
   .gd-ref-search {
     width: 100%;
     margin: 0 0 var(--gd-space-1);
-    padding: 4px 8px;
+    padding: 3px 6px;
     color: var(--gd-text);
     background: var(--gd-canvas);
     border: 1px solid var(--gd-border);

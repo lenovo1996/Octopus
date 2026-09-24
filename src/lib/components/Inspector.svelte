@@ -157,32 +157,6 @@
 </script>
 
 <aside class="gd-inspector" style="width: {width}px" aria-label="Inspector">
-  <div class="gd-inspector-tabs" role="tablist" aria-label="Inspector states">
-    <button
-      type="button"
-      role="tab"
-      aria-selected={state === "working"}
-      class:active={state === "working"}
-      onclick={() => onStateChange("working")}>Working changes</button
-    >
-    <button
-      type="button"
-      role="tab"
-      aria-selected={state === "commit"}
-      class:active={state === "commit"}
-      onclick={() => onStateChange("commit")}>Commit details</button
-    >
-    {#if mergeBanner || conflictFiles?.length || state === "conflict"}
-    <button
-      type="button"
-      role="tab"
-      aria-selected={state === "conflict"}
-      class:active={state === "conflict"}
-      onclick={() => onStateChange("conflict")}>Conflict</button
-    >
-    {/if}
-  </div>
-
   {#if state === "working"}
     <WorkingChangesPanel {branchName} files={statusFiles} loading={statusLoading} error={statusError} {trustBlocked}
       selectedTarget={selectedDiffTarget} {indexBusy} {indexError} subject={commitMessage} body={commitBody}

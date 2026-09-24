@@ -26,9 +26,9 @@
   --gd-lane-6: #f199b8;
   --gd-font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --gd-font-code: ui-monospace, "Cascadia Code", "Liberation Mono", monospace;
-  --gd-font-size: 13px;
-  --gd-font-size-small: 12px;
-  --gd-font-size-title: 15px;
+  --gd-font-size: 12px;
+  --gd-font-size-small: 11px;
+  --gd-font-size-title: 14px;
   --gd-space-1: 4px;
   --gd-space-2: 8px;
   --gd-space-3: 12px;
@@ -36,10 +36,10 @@
   --gd-space-5: 24px;
   --gd-radius-control: 4px;
   --gd-radius-panel: 6px;
-  --gd-topbar-height: 48px;
-  --gd-toolbar-height: 44px;
-  --gd-statusbar-height: 24px;
-  --gd-row-height: 32px;
+  --gd-topbar-height: 40px;
+  --gd-toolbar-height: 36px;
+  --gd-statusbar-height: 22px;
+  --gd-row-height: 28px;
   --gd-sidebar-width: 220px;
   --gd-inspector-width: 380px;
   --gd-graph-lane-width: 20px;

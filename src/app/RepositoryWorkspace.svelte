@@ -6,6 +6,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import BitbucketAuthModal from "../lib/components/BitbucketAuthModal.svelte";
   import DiscardConfirmModal from "../lib/components/DiscardConfirmModal.svelte";
+  import GitActions from "../lib/components/GitActions.svelte";
   import GitToolbar from "../lib/components/GitToolbar.svelte";
   import HelpModal from "../lib/components/HelpModal.svelte";
   import MergeModal from "../lib/components/MergeModal.svelte";
@@ -2433,7 +2434,27 @@
       onOpenSettings={() => (showSettings = true)}
       onOpenHelp={() => (showHelp = true)}
       repoName={session.displayName}
-    />
+    >
+      {#snippet actions()}
+        <GitActions
+          onBranches={() => openBranches()}
+          syncDisabled={syncDisabled}
+          {syncDisabledReason}
+          jobActive={syncJobActive}
+          activeJobKind={syncJobActive ? (syncJob?.kind ?? null) : null}
+          onFetch={() => void startSyncJob("fetch")}
+          onPull={() => void startSyncJob("pull")}
+          onPush={() => void startSyncJob("push")}
+          onMerge={openMerge}
+          onStash={openStash}
+          onCancel={() => void cancelSyncJob()}
+          {bitbucketAvailable}
+          onConnectBitbucket={openBitbucketAuth}
+          logOpen={syncLogOpen}
+          onToggleLog={toggleSyncLog}
+        />
+      {/snippet}
+    </TopBar>
     <GitToolbar
       onBranches={() => openBranches()}
       {remoteLabel}

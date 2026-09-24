@@ -27,7 +27,7 @@
 </li>
 
 <style>
-  .gd-file-row { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 5px 8px; border-left: 2px solid transparent; border-radius: 4px; }
+  .gd-file-row { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 6px; border-left: 2px solid transparent; border-radius: 4px; }
   .gd-file-row:hover { background: var(--gd-surface-hover); }
   .gd-file-row.selected { background: var(--gd-surface-selected); border-left-color: var(--gd-accent); }
   .gd-file-row.contexted { background: var(--gd-surface-hover); box-shadow: inset 3px 0 var(--gd-focus); }
@@ -39,7 +39,7 @@
   .gd-file-name { font-size: var(--gd-font-size-small); }
   .gd-file-directory { color: var(--gd-text-secondary); font-size: 10px; line-height: 14px; }
   .gd-file-actions { flex: 0 0 auto; display: flex; gap: 4px; }
-  .gd-file-action { flex: 0 0 27px; width: 27px; height: 27px; border: 1px solid transparent; border-radius: 4px; color: var(--gd-text-secondary); background: transparent; font-size: 16px; cursor: pointer; opacity: .72; }
+  .gd-file-action { flex: 0 0 24px; width: 24px; height: 24px; border: 1px solid transparent; border-radius: 4px; color: var(--gd-text-secondary); background: transparent; font-size: 16px; cursor: pointer; opacity: .72; }
   .gd-file-row:hover .gd-file-action, .gd-file-row:focus-within .gd-file-action { opacity: 1; background: var(--gd-canvas); border-color: var(--gd-border); }
   .gd-index:hover { color: var(--gd-accent); border-color: var(--gd-accent) !important; }
   .gd-discard:hover { color: var(--gd-danger); border-color: var(--gd-danger) !important; }
