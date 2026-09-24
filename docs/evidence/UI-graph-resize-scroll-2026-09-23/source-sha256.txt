@@ -1,0 +1,3 @@
+cedfb6bf083b5a04ec3894c399072b627471ebc010dbbeb31748b49699ee87be  src/lib/components/HistoryPane.svelte
+08ad9568ef0c6c65878d497918f1f02e7dee39172cee5280eb58220d178ffdb9  src/lib/components/ColumnResize.svelte
+a7e692a7bca0c775d6963ab6992b5dd8863560afdc7c13cd191da70e0b7fd4ab  src/lib/components/Splitter.svelte

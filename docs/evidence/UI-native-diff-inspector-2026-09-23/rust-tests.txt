@@ -1,0 +1,607 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/gitdock_lib-2646f76082c4072f)
+
+running 115 tests
+test commands::diff::tests::diff_request_accepts_frontend_json_for_every_source ... ok
+Initialized empty Git repository in /tmp/gitdock-t08-cmd-18-json-index-worktree/repo/.git/
+[main (root-commit) 42072bc] init
+Initialized empty Git repository in /tmp/gitdock-t10-partial/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t10-blocks/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t10-hook/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t08-cmd-18-commit/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t08-cmd-18-gated/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t10-refusals/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t10-detached/repo/.git/
+[main ad53c98] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 file.txt
+Initialized empty Git repository in /tmp/gitdock-t10-unborn-commit/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t10-branches/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t10-daily/repo/.git/
+[main (root-commit) 42072bc] init
+[main (root-commit) 42072bc] init
+[main (root-commit) 6411342] one
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+[main (root-commit) 42072bc] init
+[main (root-commit) 42072bc] init
+[main (root-commit) 42072bc] init
+[main (root-commit) 42072bc] init
+[main 60bd07c] a
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+test commands::diff::tests::worktree_diff_is_trust_gated_and_token_bound ... ok
+test commands::diff::tests::frontend_json_reads_index_and_worktree_with_distinct_content ... ok
+HEAD is now at 42072bc init
+[main 769a61d] f
+ 1 file changed, 1 insertion(+)
+ create mode 100644 f.txt
+Switched to a new branch 'side'
+[side dd58025] side
+ 1 file changed, 1 insertion(+)
+ create mode 100644 side.txt
+test commands::commit::tests::hook_failure_keeps_everything_for_retry ... ok
+rm 'a.txt'
+Switched to branch 'main'
+test commands::diff::tests::commit_diff_works_read_only_via_details_tokens ... ok
+test commands::commit::tests::empty_index_identity_and_conflicts_block ... ok
+[main (root-commit) 5d7e31f] only commit
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+test commands::commit::tests::unborn_first_commit_and_empty_subject_blocked ... ok
+test commands::commit::tests::daily_commit_e2e_commits_only_the_index ... ok
+[main (root-commit) fc3fd0e] commit number 0
+[feature a29d764] feature work
+ 1 file changed, 1 insertion(+)
+ create mode 100644 feat.txt
+test commands::branch::tests::create_then_dirty_switch_reports_partial_success ... ok
+[main (root-commit) 6411342] one
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+test commands::commit::tests::detached_head_commit_is_allowed ... ok
+[main d8d6812] commit number 1
+[main eb20d3c] commit number 2
+test commands::history::tests::detached_and_unborn_scopes ... ok
+[main (root-commit) 287829d] first
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+[main 797f497] commit number 3
+[main (root-commit) 9c4d0c2] root
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+[main 2744e51] main work
+ 1 file changed, 1 insertion(+)
+ create mode 100644 main.txt
+[main (root-commit) fc3fd0e] commit number 0
+[main (root-commit) 535dee5] c0
+[main 4cc6d21] commit number 4
+[main (root-commit) 6916623] plain work
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+[main d8d6812] commit number 1
+[main (root-commit) fc3fd0e] commit number 0
+[main ec29f3e] c1
+[main 54a1cf7] commit number 5
+[main eb20d3c] commit number 2
+[main d8d6812] commit number 1
+[main 1a9cb6f] fix (login) [urgent]
+ 1 file changed, 1 insertion(+)
+ create mode 100644 b.txt
+[main c6c6127] commit number 6
+[main 797f497] commit number 3
+[main c8724c3] c2
+test commands::history::tests::refs_peel_and_current ... ok
+[main 9398d8a] commit number 7
+[main eb20d3c] commit number 2
+[main c7842c4] more plain work
+ 1 file changed, 1 insertion(+)
+ create mode 100644 c.txt
+[main 4cc6d21] commit number 4
+test commands::branch::tests::dirty_switch_and_unmerged_delete_refuse ... ok
+test commands::history::tests::root_and_invalid_oid_rules ... ok
+[main 3f64e8b] c3
+[main 54a1cf7] commit number 5
+[main 797f497] commit number 3
+[main b104941] c4
+Initialized empty Git repository in /tmp/gitdock-t13-addadd-18/repo/.git/
+[main 4cc6d21] commit number 4
+[main c6c6127] commit number 6
+[main (root-commit) c8f3274] fix (login) [urgent]: handle --weird "quotes"
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+Initialized empty Git repository in /tmp/gitdock-t13-abort-18/repo/.git/
+[main 54a1cf7] commit number 5
+test commands::history::tests::page_flags_truncation_only_at_cache_end ... ok
+[main 9398d8a] commit number 7
+test commands::history::tests::ref_scope_and_checked_out_elsewhere ... ok
+test commands::history::tests::merge_details_and_parent_selection ... ok
+[main c6c6127] commit number 6
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+Initialized empty Git repository in /tmp/gitdock-t13-uptodate-18/repo/.git/
+[main 0229c19] commit number 8
+Switched to a new branch 'feature'
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+[main 9398d8a] commit number 7
+test commands::history::tests::tricky_message_roundtrip_against_git_oracle ... ok
+[main 9de1259] commit number 9
+Initialized empty Git repository in /tmp/gitdock-t13-binsym-18/repo/.git/
+[main 042d550] add f
+ 1 file changed, 1 insertion(+)
+ create mode 100644 f.txt
+[feature 9db7bbe] feature adds
+ 1 file changed, 1 insertion(+)
+ create mode 100644 new.txt
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+Initialized empty Git repository in /tmp/gitdock-t13-clean-18/repo/.git/
+Switched to a new branch 'feature'
+[main fd1594e] commit number 10
+Switched to branch 'main'
+Initialized empty Git repository in /tmp/gitdock-t13-blocked-18/repo/.git/
+[main a1e7419] commit number 11
+test commands::history::tests::topology_truncates_at_explicit_cap ... ok
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+[main 44dd368] main adds
+ 1 file changed, 1 insertion(+)
+ create mode 100644 new.txt
+[main 71088ab] commit number 12
+[feature 073effe] feature side
+ 1 file changed, 1 insertion(+)
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+Switched to branch 'main'
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+Switched to a new branch 'feature'
+[main c2628a6] add bin
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ create mode 100644 bin.dat
+[main aef3700] commit number 13
+Initialized empty Git repository in /tmp/gitdock-t13-content-18/repo/.git/
+[main 523f0cb] main side
+ 1 file changed, 1 insertion(+)
+[main 042d550] add f
+ 1 file changed, 1 insertion(+)
+ create mode 100644 f.txt
+[main 21d6751] add link
+ 1 file changed, 1 insertion(+)
+ create mode 120000 link
+[feature d170bcd] feature
+ 1 file changed, 1 insertion(+)
+ create mode 100644 feat.txt
+[main 7397562] commit number 14
+test commands::branch::tests::create_switch_and_delete_round_trip ... ok
+Switched to a new branch 'feature'
+Switched to branch 'main'
+Switched to a new branch 'feature'
+[main 077ae52] commit number 15
+test commands::merge::tests::already_up_to_date_is_a_noop ... ok
+[main 1cd4a70] commit number 16
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+[feature 073effe] feature side
+ 1 file changed, 1 insertion(+)
+Initialized empty Git repository in /tmp/gitdock-t13-dirty-18/repo/.git/
+Switched to branch 'main'
+test commands::history::tests::shallow_clone_marks_boundary ... ok
+[main 705d0ad] commit number 17
+[feature a2aec93] feature sides
+ 3 files changed, 2 insertions(+), 1 deletion(-)
+ create mode 100644 feat.txt
+[main 042d550] add f
+ 1 file changed, 1 insertion(+)
+ create mode 100644 f.txt
+Switched to branch 'main'
+Initialized empty Git repository in /tmp/gitdock-t13-external-18/repo/.git/
+[main 5421dde] commit number 18
+Switched to a new branch 'feature'
+[main 523f0cb] main side
+ 1 file changed, 1 insertion(+)
+[main 3142cce] commit number 19
+Initialized empty Git repository in /tmp/gitdock-t13-moddel-18/repo/.git/
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+[feature 073effe] feature side
+ 1 file changed, 1 insertion(+)
+Switched to a new branch 'feature'
+[main 04be360] commit number 20
+Switched to branch 'main'
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+[main e782b90] main sides
+ 3 files changed, 2 insertions(+), 1 deletion(-)
+ create mode 100644 main.txt
+[main c1b11a2] commit number 21
+[feature d170bcd] feature
+ 1 file changed, 1 insertion(+)
+ create mode 100644 feat.txt
+[main 523f0cb] main side
+ 1 file changed, 1 insertion(+)
+[main d0ba933] commit number 22
+[main 042d550] add f
+ 1 file changed, 1 insertion(+)
+ create mode 100644 f.txt
+[main (root-commit) 14c3051] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+Switched to branch 'main'
+Switched to a new branch 'feature'
+test commands::history::tests::metadata_batches_past_chunk_size ... ok
+[main b9391a1] commit number 23
+test commands::history::tests::search_is_literal_and_paginates ... ok
+[main 4dcea2a] add gone
+ 1 file changed, 1 insertion(+)
+ create mode 100644 gone.txt
+[feature 073effe] feature side
+ 1 file changed, 1 insertion(+)
+Switched to a new branch 'feature'
+[main 09644d6] commit number 24
+Switched to branch 'main'
+rm 'gone.txt'
+Initialized empty Git repository in /tmp/gitdock-t13-rename-18/repo/.git/
+Switched to a new branch 'stranger'
+[main 3d7f45f] commit number 25
+[main 523f0cb] main side
+ 1 file changed, 1 insertion(+)
+[feature becb9f2] feature deletes
+ 1 file changed, 1 deletion(-)
+ delete mode 100644 gone.txt
+Initialized empty Git repository in /tmp/gitdock-t13-stale-fp-18/repo/.git/
+Switched to branch 'main'
+[main 40e080f] commit number 26
+Auto-merging f.txt
+CONFLICT (content): Merge conflict in f.txt
+Automatic merge failed; fix conflicts and then commit the result.
+[stranger (root-commit) ccaed33] stranger
+ 2 files changed, 2 insertions(+)
+ create mode 100644 base.txt
+ create mode 100644 s.txt
+[main (root-commit) e3e3769] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+Switched to branch 'main'
+[main b81bfc7] commit number 27
+test commands::merge::tests::complete_with_unmerged_entries_refuses ... ok
+test commands::merge::tests::submodule_modes_classify_as_unsupported_with_external_reason ... ok
+test commands::preflight::tests::enforces_minimum_baseline ... ok
+test commands::preflight::tests::parses_plain_and_suffixed_versions ... ok
+test commands::preflight::tests::preflight_rejects_empty_request_id ... ok
+test commands::preflight::tests::preflight_reports_real_git ... ok
+test commands::merge::tests::abort_restores_premerge_head_behind_token ... ok
+test commands::preflight::tests::rejects_non_git_output ... ok
+[main fab2411] main modifies
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+[main eaa8d50] commit number 28
+[main ae65cb3] add orig
+ 1 file changed, 1 insertion(+)
+ create mode 100644 orig.txt
+[main (root-commit) e3e3769] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/gitdock-t03-18-1-harness/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t03-18-0-harness/bare.git/
+Switched to a new branch 'side-a'
+test commands::merge::tests::add_add_conflict_resolves_whole_file ... [main df59c10] commit number 29
+ok
+[main 3536d47] add f
+ 1 file changed, 1 insertion(+)
+ create mode 100644 f.txt
+[side-a 1fe5d94] rename to a
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ rename orig.txt => a.txt (100%)
+[main a7b9d0a] commit number 30
+test commands::repos::tests::bare_missing_and_file_rejected ... ok
+Switched to branch 'main'
+Switched to a new branch 'feature'
+Switched to a new branch 'side-b'
+[main (root-commit) 9a290dd] test commit
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+[main a3c6265] commit number 31
+rm 'orig.txt'
+Initialized empty Git repository in /tmp/gitdock-t03-18-3-harness/repo/.git/
+HEAD is now at 9a290dd test commit
+test commands::merge::tests::clean_merge_completes_with_two_parents ... ok
+[main 88e19d6] commit number 32
+[feature 4992edf] feature side
+ 1 file changed, 1 insertion(+)
+[side-b 357758b] rename to b
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ rename orig.txt => b.txt (100%)
+test commands::merge::tests::dirty_worktree_and_unrelated_histories_refuse ... ok
+[main (root-commit) 9a290dd] test commit
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+Initialized empty Git repository in /tmp/gitdock-t03-18-4-harness/repo/.git/
+Switched to branch 'main'
+Preparing worktree (new branch 'linked')
+Switched to branch 'side-a'
+[main f917f6e] commit number 33
+test commands::repos::tests::recent_list_caps_at_twenty ... ok
+[main 06872f3] commit number 34
+[main (root-commit) 9a290dd] test commit
+ 1 file changed, 1 insertion(+)
+ create mode 100644 a.txt
+[main 26514ff] main side
+ 1 file changed, 1 insertion(+)
+Initialized empty Git repository in /tmp/gitdock-t03-18-6-harness/repo/.git/
+HEAD is now at 9a290dd test commit
+[main 28b2670] commit number 35
+[main d8957de] commit number 36
+[main 4f41a52] commit number 37
+test commands::repos::tests::init_flow_and_refusals ... ok
+test commands::settings::tests::corrupted_files_back_up_and_default ... ok
+test commands::settings::tests::font_scale_update_bumps_version ... ok
+test commands::settings::tests::fresh_store_returns_default_settings ... ok
+test commands::settings::tests::future_schema_fails_safe ... ok
+test commands::settings::tests::patch_accepts_rejects_and_detects_conflicts ... ok
+test commands::settings::tests::patch_rejects_unknown_fields ... ok
+test commands::merge::tests::binary_and_symlink_conflicts_stay_external ... ok
+[main 6f5cf2b] commit number 38
+test commands::repos::tests::detached_head_and_trust_roundtrip ... ok
+test commands::settings::tests::pre_settings_files_migrate_with_defaults ... ok
+test commands::repos::tests::unborn_head_opens ... ok
+Initialized empty Git repository in /tmp/gitdock-t09-guards/repo/.git/
+test commands::repos::tests::linked_worktree_discovers ... ok
+[main 66dc1c8] commit number 39
+Initialized empty Git repository in /tmp/gitdock-t09-rename/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t09-selective/repo/.git/
+[main (root-commit) c17a3e6] init
+Initialized empty Git repository in /tmp/gitdock-t09-unborn/repo/.git/
+test commands::stage::tests::guards_reject_garbage_before_any_write ... ok
+[main 74adb49] commit number 40
+[main (root-commit) c17a3e6] init
+[main (root-commit) c17a3e6] init
+Initialized empty Git repository in /tmp/gitdock-t12-apply-pop-18/repo/.git/
+[main ccd2d53] commit number 41
+[main (root-commit) c17a3e6] init
+Initialized empty Git repository in /tmp/gitdock-t12-conflict-18/repo/.git/
+[main c6e6093] base
+ 2 files changed, 2 insertions(+)
+ create mode 100644 old.txt
+ create mode 100644 star*.txt
+[main 8c5656b] three
+ 3 files changed, 3 insertions(+)
+ create mode 100644 one.txt
+ create mode 100644 three.txt
+ create mode 100644 two.txt
+[main (root-commit) c17a3e6] init
+[main a4edcdc] commit number 42
+[main (root-commit) c17a3e6] init
+test commands::merge::tests::rename_rename_conflict_lists_entries_without_app_writes ... ok
+[main 8406c42] commit number 43
+test commands::repos::tests::open_ordinary_and_subfolder_share_root ... ok
+[main a58234c] add f
+ 1 file changed, 1 insertion(+)
+ create mode 100644 f.txt
+[main 671d70d] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 f.txt
+[main 904ce57] commit number 44
+Initialized empty Git repository in /tmp/gitdock-t12-tracked-only-18/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t12-reorder-18/repo/.git/
+[main 06145d9] commit number 45
+test commands::stage::tests::unborn_unstage_keeps_the_file ... [main (root-commit) c17a3e6] init
+ok
+[main (root-commit) c17a3e6] init
+test commands::merge::tests::stale_fingerprint_and_missing_side_refuse ... ok
+test commands::status::tests::close_is_blocked_while_a_job_runs_and_frees_after ... ok
+[main 2db777f] commit number 46
+test commands::status::tests::double_submit_dedups_same_payload_and_rejects_drift ... ok
+test commands::status::tests::dto_shapes_match_the_typescript_contract ... ok
+Initialized empty Git repository in /tmp/gitdock-t12-untracked-18/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t07-status-18-0-stale/repo/.git/
+[main 9ad6b7e] commit number 47
+[main a58234c] add f
+ 1 file changed, 1 insertion(+)
+ create mode 100644 f.txt
+[main 005b459] add tracked
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+[main (root-commit) c17a3e6] init
+[main 28143d3] commit number 48
+[main (root-commit) c17a3e6] init
+test commands::stage::tests::rename_and_magic_names_round_trip ... ok
+test commands::status::tests::operation_get_falls_back_for_missed_events_and_rejects_unknown ... ok
+[main 2ad1181] commit number 49
+test commands::status::tests::external_change_invalidates_previous_tokens ... ok
+Initialized empty Git repository in /tmp/gitdock-t07-status-18-1-storm/repo/.git/
+[main 005b459] add tracked
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+[main 039723f] diverge
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+Initialized empty Git repository in /tmp/gitdock-t07-status-18-2-counts/repo/.git/
+[main 62ebb82] commit number 50
+test commands::merge::tests::external_merge_abort_refuses_but_complete_works ... ok
+test commands::stage::tests::stage_is_selective_and_unstage_keeps_worktree_bytes ... ok
+test commands::status::tests::write_queues_serialize_per_common_dir ... ok
+[main 2dd33d0] commit number 51
+[main (root-commit) c17a3e6] init
+[main (root-commit) c17a3e6] init
+test commands::sync::tests::execute_remote_forwards_progress_percentages ... ok
+test commands::sync::tests::execute_remote_honors_pre_set_cancel ... ok
+Initialized empty Git repository in /tmp/gitdock-t07-status-18-3-gated/repo/.git/
+test commands::status::tests::snapshot_counts_fill_only_when_trusted ... ok
+[main 2f9d96b] commit number 52
+test commands::sync::tests::execute_remote_reports_failure ... ok
+test commands::sync::tests::execute_remote_reports_success ... ok
+test domain::error::tests::all_error_codes_round_trip ... ok
+test domain::error::tests::err_envelope_matches_ts_contract_shape ... ok
+test domain::error::tests::ok_envelope_uses_camel_case_request_id ... ok
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+test commands::merge::tests::modify_delete_offers_deletion_not_side_accept ... ok
+Initialized empty Git repository in /tmp/gitdock-t11-18-roundtrip/origin.git/
+[main (root-commit) c17a3e6] init
+[main c40d63e] commit number 53
+Cloning into 'a'...
+Initialized empty Git repository in /tmp/gitdock-t10-identity/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t10-preconds/repo/.git/
+[main f765331] commit number 54
+test commands::status::tests::status_is_trust_gated_and_lists_staged_unstaged ... ok
+warning: You appear to have cloned an empty repository.
+done.
+[main (root-commit) c17a3e6] init
+test commands::merge::tests::content_conflict_accept_mark_complete_flow ... ok
+test git::diff::tests::detects_binary_patches ... ok
+Switched to a new branch 'main'
+[main 6484ac1] commit number 55
+test commands::stash::tests::pop_conflict_keeps_the_stash_and_marks_conflict_state ... ok
+test git::diff::tests::parses_hunks_line_numbers_and_no_newline_marker ... ok
+test git::commit::tests::identity_reports_scope_without_secrets ... ok
+test commands::stash::tests::save_defaults_to_tracked_only_and_reports_no_change ... ok
+Initialized empty Git repository in /tmp/gitdock-t08-18-0-commit/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t08-18-2-magic/repo/.git/
+[main f072591] commit number 56
+Initialized empty Git repository in /tmp/gitdock-t08-18-1-limits/repo/.git/
+[main (root-commit) f654b2e] v1
+ 1 file changed, 1 insertion(+)
+ create mode 100644 file.txt
+test commands::status::tests::rapid_refreshes_stay_consistent_under_storm ... ok
+test git::commit::tests::empty_index_and_unmerged_detection ... ok
+test git::diff::tests::truncates_at_the_line_cap ... ok
+test git::history::tests::parses_plain_and_merge_commit_objects ... ok
+test git::history::tests::parses_rename_and_plain_name_status ... ok
+test git::history::tests::skips_malformed_batch_records ... ok
+test git::history::tests::timestamp_formats_spot_check ... ok
+test git::remote::redaction_corpus_tests::corpus_keeps_routing_intact ... ok
+test git::remote::redaction_corpus_tests::corpus_never_leaks_secrets ... ok
+test git::remote::tests::network_classifier_buckets ... ok
+test git::remote::tests::progress_lines_parse ... ok
+[main (root-commit) c17a3e6] init
+test git::remote::tests::redaction_strips_secrets_but_keeps_routing ... ok
+test git::remote::tests::scp_shapes_are_not_confused_with_local_paths ... ok
+[main e8d88d7] commit number 57
+Initialized empty Git repository in /tmp/gitdock-t08-18-4-special/repo/.git/
+Initialized empty Git repository in /tmp/gitdock-t08-18-3-cases/repo/.git/
+[main (root-commit) c17a3e6] init
+test git::remote::tests::url_policy_accepts_and_rejects ... ok
+[main (root-commit) c17a3e6] init
+test git::status::tests::headers_parse_branch_upstream_ahead_behind ... ok
+Initialized empty Git repository in /tmp/gitdock-t08-18-5-worktree/repo/.git/
+[main a53fc96] commit number 58
+[main ef8cbf9] magic
+ 2 files changed, 2 insertions(+)
+ create mode 100644 star*.txt
+ create mode 100644 starX.txt
+[main (root-commit) c17a3e6] init
+Initialized empty Git repository in /tmp/gitdock-t07-18-0-lock/repo/.git/
+[main (root-commit) c17a3e6] init
+[main (root-commit) c17a3e6] init
+[main daa73a8] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 base.txt
+[main fe6ab6f] big
+ 1 file changed, 1 insertion(+)
+ create mode 100644 big.txt
+test git::diff::tests::pathspec_magic_stays_literal ... ok
+[main 09ab8a4] commit number 59
+Switched to a new branch 'side'
+test commands::stash::tests::save_with_include_untracked_takes_new_files ... ok
+[main (root-commit) c17a3e6] init
+test git::status::tests::malformed_records_are_errors ... ok
+test git::status::tests::non_utf8_paths_stay_raw_and_untracked_marked ... ok
+test git::status::tests::ordinary_entry_with_spaces_and_staged_unstaged ... ok
+test git::status::tests::rename_keeps_both_raw_paths_with_newline ... ok
+test git::status::tests::symlink_submodule_kinds_from_modes ... ok
+test git::status::tests::unborn_and_detached_heads ... ok
+test git::status::tests::unknown_record_types_are_skipped ... ok
+test git::status::tests::unmerged_entries_are_conflicted ... ok
+[main 3e9df95] add a
+ 1 file changed, 2 insertions(+)
+ create mode 100644 a.txt
+[main b5f3641] files
+ 4 files changed, 3 insertions(+)
+ create mode 100644 bin.dat
+ create mode 100644 mode.sh
+ create mode 100644 old.txt
+ create mode 100644 "raw-\377.txt"
+test commands::stash::tests::apply_retains_and_pop_drops_the_entry ... ok
+[main a6cc861] commit number 60
+[main c419981] noeol
+ 1 file changed, 2 insertions(+)
+ create mode 100644 noeol.txt
+Initialized empty Git repository in /tmp/gitdock-t07-18-1-live/repo/.git/
+test git::status::tests::index_lock_is_tolerated_and_preserved ... ok
+[side 0e94839] side
+ 1 file changed, 1 insertion(+)
+ create mode 100644 side.txt
+[main ca05f98] commit number 61
+Initialized empty Git repository in /tmp/gitdock-t08-18-4-special/fresh/.git/
+test git::diff::tests::worktree_text_and_untracked_preview ... ok
+Switched to branch 'main'
+Cloning into 'b'...
+[main (root-commit) c17a3e6] init
+[main 9e1042b] commit number 62
+test commands::stash::tests::reordered_stash_fails_closed_on_oid_mismatch ... ok
+test git::diff::tests::symlink_submodule_and_index_unborn ... ok
+done.
+warning: remote HEAD refers to nonexistent ref, unable to checkout
+[main bc45a24] commit number 63
+[main 17741fe] main
+ 1 file changed, 1 insertion(+)
+ create mode 100644 main.txt
+[main bc568f8] second
+ 2 files changed, 2 insertions(+)
+ create mode 100644 a.txt
+ create mode 100644 del.txt
+test git::diff::tests::oversize_and_no_final_newline ... ok
+[main 49a9dee] commit number 64
+Merge made by the 'ort' strategy.
+test git::diff::tests::rename_binary_mode_only_and_non_utf8_paths ... ok
+ side.txt | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 side.txt
+test commands::sync::tests::execute_remote_round_trips_push_and_fetch ... ok
+test git::status::tests::live_repo_matches_v1_oracle ... ok
+test git::diff::tests::commit_root_and_second_parent ... ok
+test commands::history::tests::pagination_matches_raw_git_oracle ... ok
+
+test result: ok. 115 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running unittests src/main.rs (src-tauri/target/debug/deps/gitdock-bf1bdccfa35c6cd5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests gitdock_lib
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

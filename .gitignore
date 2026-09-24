@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Frontend build output (Tauri frontendDist)
+dist/
+build/
+
+# Rust build output
+src-tauri/target/
+
+# Logs and OS noise
+*.log
+.DS_Store
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+
+# Local test artifacts (never commit fixture repos or raw logs)
+.tmp/

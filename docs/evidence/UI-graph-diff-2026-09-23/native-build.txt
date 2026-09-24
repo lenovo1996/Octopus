@@ -1,0 +1,26 @@
+
+> gitdock@0.1.0 tauri /home/phi/Projects/personal/git-build
+> tauri build --no-bundle
+
+        Info Looking up installed tauri packages to check mismatched versions...
+        Warn The bundle identifier "com.gitdock.app" set in `"tauri.conf.json" identifier` ends with `.app`. This is not recommended because it conflicts with the application bundle extension on macOS.
+     Running beforeBuildCommand `pnpm build`
+
+> gitdock@0.1.0 build /home/phi/Projects/personal/git-build
+> vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 160 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                    0.39 kB │ gzip:  0.26 kB
+dist/assets/index-Ak0PDvwm.css    34.64 kB │ gzip:  5.03 kB
+dist/assets/dist-js-DyRmBecZ.js    0.16 kB │ gzip:  0.16 kB
+dist/assets/event-_hiZckoB.js      1.03 kB │ gzip:  0.54 kB
+dist/assets/index-CUTE8MkW.js    163.46 kB │ gzip: 48.85 kB
+
+✓ built in 916ms
+   Compiling gitdock v0.1.0 (/home/phi/Projects/personal/git-build/src-tauri)
+    Finished `release` profile [optimized] target(s) in 2m 07s
+       Built application at: /home/phi/Projects/personal/git-build/src-tauri/target/release/gitdock

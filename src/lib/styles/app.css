@@ -1,0 +1,19 @@
+/* Copied from docs/design/tokens.css (source of truth) at T01. */
+@import "./tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--gd-canvas);
+  color: var(--gd-text);
+}
