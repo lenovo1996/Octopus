@@ -12,3 +12,14 @@
 - Tests: 3 unit `select_patch_lines` + integration temp-repo (stage đúng 1 dòng, stale hunk STALE_STATE, unstage đúng 1 dòng, worktree nguyên bytes); FE `diff-lines.test.ts` cho rule ordinal. Rust 149/149, clippy/fmt sạch; FE 130/130, lint + check sạch.
 - CDP demo: hunk có marker thì nút disable đúng title; hunk-2 stage/unstage click không lỗi, diff vẫn mở.
 - Build line-stage: .deb + .rpm mới 11:52 (có tính năng); AppImage fail Text file busy do app cũ còn chạy — user tắt app cũ rồi bundle lại AppImage sau.
+
+## Fix GIT_ERROR unstage lines (2026-09-24)
+
+- Nguyên nhân: unstage dùng `apply --cached --reverse` trên sub-patch cắt từ staged diff — old side của patch đảo ngược mô tả blob không tồn tại ở đâu nên git luôn rớt (trừ case xóa thuần). Fix: `select_patch_lines_staged` dựng patch forward khớp index thật (dòng giữ đảo dấu, dropped `+` thành context, dropped `-` bỏ), apply `--cached` thường.
+- Thêm 2 edge: file mới stage + unstage từng phần (viết lại prelude `--- a/...`), unstage hết dòng → gỡ entry bằng `restore --staged` (giống whole-file unstage; `rm --cached` bị git từ chối khi worktree đã đổi); file đã xóa khỏi index thì từ chối line-level, dùng unstage cả file.
+- Tests: 3 unit staged + integration temp-repo (mod + new-file partial/full). Rust 153/153, clippy/fmt sạch; FE không đổi (130/130, lint sạch). Build đủ 3 bundle.
+
+## Fix PR UNSUPPORTED với remote có username (2026-09-24)
+
+- Remote `https://user@bitbucket.org/...` bị nhánh parse SSH short-form chặn trước (userinfo chứa `/` nên return None), nhánh https strip userinfo phía sau thành dead code. Fix: parse scheme trước, SSH chỉ khi không có `://`.
+- Tests: thêm case userinfo bitbucket/github vào test detect sẵn có (fail trước, pass sau). Rust 153/153, clippy sạch. Build đủ 3 bundle.

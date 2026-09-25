@@ -1139,13 +1139,20 @@ fn detect_pr_provider(remote_url: &str) -> Option<PrCoords> {
     if url.chars().any(char::is_control) {
         return None;
     }
-    // SSH short form: `git@github.com:owner/repo.git`.
-    if let Some(after_at) = url.split_once('@') {
-        if after_at.0.is_empty() || after_at.0.contains('/') || after_at.0.contains(':') {
+    // Scheme URLs first: an `https://user@host/...` remote must never fall
+    // into the SSH branch below (its userinfo contains `/` and `:`).
+    if let Some((scheme, rest)) = url.split_once("://") {
+        if !(scheme.eq_ignore_ascii_case("https") || scheme.eq_ignore_ascii_case("http")) {
             return None;
         }
-        let (host, mut path) = after_at.1.split_once(':')?;
-        if host.is_empty() || path.is_empty() || path.contains("://") {
+        // Strip optional userinfo.
+        let rest = rest
+            .rsplit_once('@')
+            .map(|(_, after)| after)
+            .unwrap_or(rest);
+        let (authority, mut path) = rest.split_once('/')?;
+        let host = authority.split(':').next().unwrap_or("");
+        if host.is_empty() {
             return None;
         }
         path = path
@@ -1154,20 +1161,15 @@ fn detect_pr_provider(remote_url: &str) -> Option<PrCoords> {
             .unwrap_or("")
             .trim_matches('/');
         path = path.strip_suffix(".git").unwrap_or(path);
-        return coords_for_host(host, path, false);
+        return coords_for_host(host, path, true);
     }
-    let (scheme, rest) = url.split_once("://")?;
-    if !(scheme.eq_ignore_ascii_case("https") || scheme.eq_ignore_ascii_case("http")) {
+    // SSH short form: `git@github.com:owner/repo.git`.
+    let after_at = url.split_once('@')?;
+    if after_at.0.is_empty() || after_at.0.contains('/') || after_at.0.contains(':') {
         return None;
     }
-    // Strip optional userinfo.
-    let rest = rest
-        .rsplit_once('@')
-        .map(|(_, after)| after)
-        .unwrap_or(rest);
-    let (authority, mut path) = rest.split_once('/')?;
-    let host = authority.split(':').next().unwrap_or("");
-    if host.is_empty() {
+    let (host, mut path) = after_at.1.split_once(':')?;
+    if host.is_empty() || path.is_empty() {
         return None;
     }
     path = path
@@ -1176,7 +1178,7 @@ fn detect_pr_provider(remote_url: &str) -> Option<PrCoords> {
         .unwrap_or("")
         .trim_matches('/');
     path = path.strip_suffix(".git").unwrap_or(path);
-    coords_for_host(host, path, true)
+    coords_for_host(host, path, false)
 }
 
 fn coords_for_host(host: &str, path: &str, _https: bool) -> Option<PrCoords> {
@@ -1980,6 +1982,15 @@ mod tests {
         assert_eq!(gitlab.provider, PrProvider::GitLab);
         assert_eq!(gitlab.namespace, "group/sub");
         assert_eq!(gitlab.repo, "widgets");
+
+        let bitbucket_user = detect_pr_provider("https://acme@bitbucket.org/acme/widgets.git")
+            .expect("bitbucket userinfo");
+        assert_eq!(bitbucket_user.provider, PrProvider::Bitbucket);
+        assert_eq!(bitbucket_user.namespace, "acme");
+        assert_eq!(bitbucket_user.repo, "widgets");
+        let github_user = detect_pr_provider("https://user:token@github.com/acme/widgets.git")
+            .expect("github userinfo");
+        assert_eq!(github_user.provider, PrProvider::GitHub);
 
         assert!(detect_pr_provider("https://example.com/acme/widgets.git").is_none());
         assert!(detect_pr_provider("git@github.com:lonely.git").is_none());
