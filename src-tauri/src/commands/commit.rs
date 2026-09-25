@@ -324,6 +324,10 @@ pub(crate) mod tests {
         let repo = dir.join("repo");
         std::fs::create_dir_all(&repo).expect("mkdir");
         git(&dir, &["init", "-b", "main", "repo"]);
+        // Commands exercised through GitRunner do not inherit the helper's
+        // one-shot identity environment, so make each fixture self-contained.
+        git(&repo, &["config", "user.name", "Octopus Test"]);
+        git(&repo, &["config", "user.email", "octopus-test@example.com"]);
         (dir, repo)
     }
 

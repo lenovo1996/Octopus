@@ -580,6 +580,10 @@ mod tests {
             .args(args)
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "Octopus Test")
+            .env("GIT_AUTHOR_EMAIL", "octopus-test@example.com")
+            .env("GIT_COMMITTER_NAME", "Octopus Test")
+            .env("GIT_COMMITTER_EMAIL", "octopus-test@example.com")
             .output()
             .expect("spawn git");
         assert!(

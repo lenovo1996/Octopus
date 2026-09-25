@@ -29,3 +29,9 @@
 - Repository tabs support HTML5 drag and drop with before/after indicators, plus "Move tab left/right" context-menu actions for keyboard users. The existing `workspacesSave` effect persists the new order.
 - Added the `reorderTabs` helper in `tabs.ts` and coverage in `tab-order.test.ts` (failed before the implementation, passed afterward). Full unit suite: 132/132; lint and type checks passed.
 - Verified with two tabs in the CDP demo: dragging the first tab past the second reversed their order correctly.
+
+## Stabilize Git identity in CI tests (2026-09-25)
+
+- GitHub Actions reached the Rust test step but five fixtures failed because the runner had no global Git author or committer identity.
+- Temporary commit-action repositories now configure their own local identity, and History test commands provide an explicit one-shot identity. The fixtures no longer depend on a developer machine's global Git config.
+- Verified the affected modules and the full 153-test Rust suite with `GIT_CONFIG_GLOBAL=/dev/null`; formatting and Clippy checks also passed.
