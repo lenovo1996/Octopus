@@ -155,6 +155,132 @@ pub fn select_patch_lines(
     Ok(result)
 }
 
+/// What unstaging selected lines needs: either a forward patch that
+/// restores exactly those lines in the index, or dropping the index entry
+/// when every line of a staged-new file is unselected back to untracked.
+pub enum LinesUnstage {
+    Apply(Vec<u8>),
+    DropIndexEntry,
+}
+
+/// Exact prelude-row match without fighting slice/array literal types.
+fn prelude_row_is(row: &[u8], marker: &[u8]) -> bool {
+    row == marker
+}
+
+/// Rebuild a one-hunk patch that un-stages the chosen changed lines of a
+/// staged (`HEAD -> index`) diff. `lines` uses the same ordinals as
+/// [`select_patch_lines`]. Kept rows flip sign (a staged `+` is removed
+/// from the index, a staged `-` is restored); dropped `+` rows anchor as
+/// context and dropped `-` rows are omitted, so the old side always
+/// matches the current index and the patch applies forward with plain
+/// `apply --cached` — never `--reverse`, whose old side would describe a
+/// blob that exists nowhere. New-file patches apply as modifications
+/// (`--- a/...` instead of `/dev/null`); selecting every line of one
+/// drops the index entry so the file returns to untracked. Deleted-file
+/// patches are refused: restoring the file is a whole-file unstage.
+pub fn select_patch_lines_staged(
+    patch: &[u8],
+    hunk_id: &str,
+    lines: &[u32],
+) -> Result<LinesUnstage, DiffError> {
+    if lines.is_empty() {
+        return Err(DiffError::Invalid(
+            "Select at least one changed line".to_string(),
+        ));
+    }
+    let (prelude, ranges) = patch_hunk_ranges(patch)
+        .ok_or_else(|| DiffError::Invalid("This file has no selectable text hunks".to_string()))?;
+    let selected = ranges
+        .into_iter()
+        .find(|range| patch_fingerprint(&patch[range.clone()]) == hunk_id)
+        .ok_or_else(|| DiffError::Invalid("The diff changed; refresh it and retry".to_string()))?;
+    let prelude_bytes = &patch[prelude];
+    let prelude_rows: Vec<&[u8]> = prelude_bytes.split(|byte| *byte == b'\n').collect();
+    let new_file = prelude_rows
+        .iter()
+        .any(|row| prelude_row_is(row, b"--- /dev/null"));
+    if !new_file
+        && prelude_rows
+            .iter()
+            .any(|row| prelude_row_is(row, b"+++ /dev/null"))
+    {
+        return Err(DiffError::Invalid(
+            "Unstage the file to restore a deleted file".to_string(),
+        ));
+    }
+    let body = &patch[selected];
+    let mut rows = body.split_inclusive(|byte| *byte == b'\n');
+    let header = rows
+        .next()
+        .filter(|row| row.starts_with(b"@@ -"))
+        .ok_or_else(|| DiffError::Invalid("The diff changed; refresh it and retry".to_string()))?;
+    let mut changed_total: u32 = 0;
+    let mut kept: Vec<Vec<u8>> = Vec::new();
+    for row in rows {
+        if row.starts_with(b"\\") {
+            return Err(DiffError::Invalid(
+                "Line actions need the whole hunk when the file has no trailing newline"
+                    .to_string(),
+            ));
+        }
+        if row.first() == Some(&b'+') || row.first() == Some(&b'-') {
+            if lines.contains(&changed_total) {
+                let mut flipped = Vec::with_capacity(row.len());
+                flipped.push(if row.first() == Some(&b'+') {
+                    b'-'
+                } else {
+                    b'+'
+                });
+                flipped.extend_from_slice(&row[1..]);
+                kept.push(flipped);
+            } else if row.first() == Some(&b'+') {
+                let mut context = Vec::with_capacity(row.len());
+                context.push(b' ');
+                context.extend_from_slice(&row[1..]);
+                kept.push(context);
+            }
+            changed_total += 1;
+        } else {
+            kept.push(row.to_vec());
+        }
+    }
+    if lines.iter().any(|line| *line >= changed_total) {
+        return Err(DiffError::Invalid(
+            "The diff changed; refresh it and retry".to_string(),
+        ));
+    }
+    if new_file && lines.len() as u32 == changed_total {
+        return Ok(LinesUnstage::DropIndexEntry);
+    }
+    let mut result = Vec::with_capacity(prelude_bytes.len() + body.len());
+    if new_file {
+        let plus = prelude_rows
+            .iter()
+            .find_map(|row| row.strip_prefix(b"+++ b/"))
+            .unwrap_or(b"");
+        for row in prelude_rows {
+            if prelude_row_is(row, b"--- /dev/null") {
+                result.extend_from_slice(b"--- a/");
+                result.extend_from_slice(plus);
+                result.push(b'\n');
+            } else if row.starts_with(b"new file mode") || row.is_empty() {
+                continue;
+            } else {
+                result.extend_from_slice(row);
+                result.push(b'\n');
+            }
+        }
+    } else {
+        result.extend_from_slice(prelude_bytes);
+    }
+    result.extend_from_slice(header);
+    for row in &kept {
+        result.extend_from_slice(row);
+    }
+    Ok(LinesUnstage::Apply(result))
+}
+
 impl From<RunError> for DiffError {
     fn from(value: RunError) -> Self {
         DiffError::Run(value)
@@ -817,6 +943,50 @@ mod tests {
         let _ = prelude;
         let id = patch_fingerprint(&patch[ranges[0].clone()]);
         assert!(select_patch_lines(patch, &id, &[0]).is_err());
+    }
+
+    #[test]
+    fn select_patch_lines_staged_flips_signs() {
+        // Staged hunk (HEAD -> index): unstaging +new restores the index
+        // toward HEAD, so kept rows flip sign and dropped + rows anchor.
+        let id = line_hunk_id();
+        let sub = select_patch_lines_staged(LINE_PATCH, &id, &[1, 2]).expect("added lines");
+        let apply = match sub {
+            LinesUnstage::Apply(bytes) => String::from_utf8(bytes).expect("ascii"),
+            LinesUnstage::DropIndexEntry => panic!("partial selection must apply"),
+        };
+        assert!(apply.contains("-new\n") && apply.contains("-extra\n"));
+        assert!(!apply.contains("old\n"), "dropped deletion is omitted");
+        assert!(!apply.contains("+new\n"));
+    }
+
+    #[test]
+    fn select_patch_lines_staged_new_file_partial_and_full() {
+        let patch = b"diff --git a/n.txt b/n.txt\nnew file mode 100644\nindex 0000000..abc1234\n--- /dev/null\n+++ b/n.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n";
+        let (prelude, ranges) = patch_hunk_ranges(patch).expect("one hunk");
+        let _ = prelude;
+        let id = patch_fingerprint(&patch[ranges[0].clone()]);
+        match select_patch_lines_staged(patch, &id, &[0]).expect("partial") {
+            LinesUnstage::Apply(bytes) => {
+                let text = String::from_utf8(bytes).expect("ascii");
+                assert!(text.contains("--- a/n.txt"), "applies as modification");
+                assert!(text.contains("-one\n") && text.contains(" two\n"));
+            }
+            LinesUnstage::DropIndexEntry => panic!("partial selection must apply"),
+        }
+        assert!(matches!(
+            select_patch_lines_staged(patch, &id, &[0, 1]).expect("full"),
+            LinesUnstage::DropIndexEntry
+        ));
+    }
+
+    #[test]
+    fn select_patch_lines_staged_refuses_deleted_file() {
+        let patch = b"diff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\nindex abc1234..0000000\n--- a/gone.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-one\n-two\n";
+        let (prelude, ranges) = patch_hunk_ranges(patch).expect("one hunk");
+        let _ = prelude;
+        let id = patch_fingerprint(&patch[ranges[0].clone()]);
+        assert!(select_patch_lines_staged(patch, &id, &[0]).is_err());
     }
 
     #[test]

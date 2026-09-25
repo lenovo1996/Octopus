@@ -22,7 +22,8 @@ use crate::domain::{
 };
 use crate::git::{
     patch_fingerprint, read_index_patch, read_worktree_patch, select_patch_hunk,
-    select_patch_lines, DiffError, GitRunner, READ_TIMEOUT,
+    select_patch_lines, select_patch_lines_staged, DiffError, GitRunner, LinesUnstage,
+    READ_TIMEOUT,
 };
 use crate::services::RepoRegistry;
 
@@ -491,51 +492,76 @@ async fn core_lines_mutate(
         return Err(bad_request("Select 1..=500 changed lines"));
     }
     let (raw, _) = registry.status_resolve(repo_id, selection.path_id)?;
-    let patch = if selection.staged_source {
-        read_index_patch(runner, &session.worktree_root, &raw)
-            .await
-            .map_err(hunk_error)?
-    } else {
-        read_worktree_patch(runner, &session.worktree_root, &raw)
-            .await
-            .map_err(hunk_error)?
-    };
-    let selected =
-        select_patch_lines(&patch, selection.hunk_id, selection.lines).map_err(hunk_error)?;
-
     let queue = registry.queue_for(&session.key());
     let _guard = queue.lock().await;
-    let argv: &[&str] = if selection.staged_source {
-        &[
-            "apply",
-            "--cached",
-            "--reverse",
-            "--recount",
-            "--whitespace=nowarn",
-        ]
+    // Unstaging builds a forward patch whose old side matches the index
+    // (never `--reverse`: the partial new side exists nowhere on disk).
+    let (success, failure) = if selection.staged_source {
+        let patch = read_index_patch(runner, &session.worktree_root, &raw)
+            .await
+            .map_err(hunk_error)?;
+        match select_patch_lines_staged(&patch, selection.hunk_id, selection.lines)
+            .map_err(hunk_error)?
+        {
+            LinesUnstage::Apply(selected) => {
+                let out = runner
+                    .run_with_stdin(
+                        &session.worktree_root,
+                        &["apply", "--cached", "--recount", "--whitespace=nowarn"],
+                        &selected,
+                        crate::git::WRITE_TIMEOUT,
+                    )
+                    .await
+                    .map_err(|_| git_failed())?;
+                (
+                    out.success,
+                    "Git could not unstage these lines; refresh the diff and retry",
+                )
+            }
+            // Every line of a staged-new file unselected: the entry goes
+            // away like a whole-file unstage, the file returns to
+            // untracked, worktree bytes untouched. `restore --staged`
+            // (not `rm --cached`) so a worktree that moved on never
+            // blocks the unstage.
+            LinesUnstage::DropIndexEntry => {
+                let argv = argv_with_paths(&["restore", "--source=HEAD", "--staged"], &[raw]);
+                let out = runner
+                    .run(&session.worktree_root, &argv, crate::git::WRITE_TIMEOUT)
+                    .await
+                    .map_err(|_| git_failed())?;
+                (
+                    out.success,
+                    "Git could not unstage these lines; refresh the diff and retry",
+                )
+            }
+        }
     } else {
-        &["apply", "--cached", "--recount", "--whitespace=nowarn"]
-    };
-    let out = runner
-        .run_with_stdin(
-            &session.worktree_root,
-            argv,
-            &selected,
-            crate::git::WRITE_TIMEOUT,
+        let patch = read_worktree_patch(runner, &session.worktree_root, &raw)
+            .await
+            .map_err(hunk_error)?;
+        let selected =
+            select_patch_lines(&patch, selection.hunk_id, selection.lines).map_err(hunk_error)?;
+        let out = runner
+            .run_with_stdin(
+                &session.worktree_root,
+                &["apply", "--cached", "--recount", "--whitespace=nowarn"],
+                &selected,
+                crate::git::WRITE_TIMEOUT,
+            )
+            .await
+            .map_err(|_| git_failed())?;
+        (
+            out.success,
+            "Git could not stage these lines; refresh the diff and retry",
         )
-        .await
-        .map_err(|_| git_failed())?;
+    };
     registry.bump(repo_id).ok_or_else(session_missing)?;
     let fresh = registry.get(repo_id).ok_or_else(session_missing)?.clone();
-    if !out.success {
+    if !success {
         let _ = super::repos::build_snapshot(runner, registry, &fresh).await;
         return Err(AppError::new(
             ErrorCode::GIT_ERROR,
-            if selection.staged_source {
-                "Git could not unstage these lines; refresh the diff and retry"
-            } else {
-                "Git could not stage these lines; refresh the diff and retry"
-            },
+            failure,
             RecoveryAction::Refresh,
             true,
         ));
@@ -1104,6 +1130,79 @@ mod tests {
         assert_eq!(
             std::fs::read(repo.join("a.txt")).expect("read"),
             b"a\nB\nc\nD\nE\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn lines_unstage_new_file_partial_and_full() {
+        let (_dir, repo) = temp_repo("lines-new");
+        git(&repo, &["commit", "--allow-empty", "-m", "base"]);
+        std::fs::write(repo.join("new.txt"), "x\ny\nz\n").expect("write");
+        git(&repo, &["add", "new.txt"]);
+
+        let runner = git_runner().expect("system git");
+        let mut registry = RepoRegistry::default();
+        let repo_id = open_repo(&mut registry, &repo, TrustState::Trusted);
+
+        // Partial: drop the first line from the index, bytes untouched.
+        let ids = live_ids(&runner, &mut registry, &repo_id).await;
+        let version = registry.get(&repo_id).expect("session").version;
+        let session = registry.get(&repo_id).expect("session").clone();
+        let staged = crate::git::read_index_patch(&runner, &session.worktree_root, b"new.txt")
+            .await
+            .expect("staged patch");
+        let hunk = first_hunk_id(&staged);
+        core_lines_mutate(
+            &runner,
+            &mut registry,
+            &repo_id,
+            version,
+            LinesSelection {
+                path_id: &ids[0].1,
+                hunk_id: &hunk,
+                lines: &[0],
+                staged_source: true,
+            },
+        )
+        .await
+        .expect("unstage one line");
+        assert_eq!(show_staged(&repo, ":new.txt"), b"y\nz\n");
+        assert_eq!(
+            std::fs::read(repo.join("new.txt")).expect("read"),
+            b"x\ny\nz\n"
+        );
+
+        // Full: the entry goes away, the file returns to untracked.
+        let ids = live_ids(&runner, &mut registry, &repo_id).await;
+        let version = registry.get(&repo_id).expect("session").version;
+        let session = registry.get(&repo_id).expect("session").clone();
+        let staged = crate::git::read_index_patch(&runner, &session.worktree_root, b"new.txt")
+            .await
+            .expect("staged patch");
+        let hunk = first_hunk_id(&staged);
+        core_lines_mutate(
+            &runner,
+            &mut registry,
+            &repo_id,
+            version,
+            LinesSelection {
+                path_id: &ids[0].1,
+                hunk_id: &hunk,
+                lines: &[0, 1],
+                staged_source: true,
+            },
+        )
+        .await
+        .expect("unstage remaining lines");
+        let gone = StdCommand::new("git")
+            .current_dir(&repo)
+            .args(["show", ":new.txt"])
+            .output()
+            .expect("git show");
+        assert!(!gone.status.success(), "index entry removed");
+        assert_eq!(
+            std::fs::read(repo.join("new.txt")).expect("read"),
+            b"x\ny\nz\n"
         );
     }
 

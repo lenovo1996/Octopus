@@ -9,7 +9,7 @@
   import { mockAdapter, createMockAdapter } from "../lib/ipc/mock";
   import { realAdapter } from "../lib/ipc/real";
   import type { AppError, PreflightData, RecentEntry, RepoSnapshot } from "../lib/ipc/types";
-  import { activeWorkspaceKey, initialWorkspace, openWorkspaceEntries, resolveRestoredActive, type WorkspaceState } from "../lib/repositories/tabs";
+  import { activeWorkspaceKey, initialWorkspace, openWorkspaceEntries, reorderTabs, resolveRestoredActive, type WorkspaceState } from "../lib/repositories/tabs";
   import { demoSession } from "../mocks/demoSession";
 
   interface RepositoryTab extends WorkspaceState {
@@ -166,6 +166,9 @@
   function updateWorkspace(id: string, state: WorkspaceState) {
     tabs = tabs.map(tab => tab.snapshot.repoId === id ? {...tab, ...state} : tab);
   }
+  function moveTabById(fromId: string, toId: string, before: boolean) {
+    tabs = reorderTabs(tabs, fromId, toId, before);
+  }
   async function startInit() {
     if (opening) return;
     error = null;
@@ -219,7 +222,7 @@
 <div class="gd-app">
   {#if tabs.length}
     <div inert={pickerOpen || showInit || currentTab?.modalOpen || false}>
-      <RepositoryTabs {tabs} {activeId} {closingIds} {opening} onSelect={selectTab} onClose={id => void closeTab(id)} onAdd={showPicker} />
+      <RepositoryTabs {tabs} {activeId} {closingIds} {opening} onSelect={selectTab} onClose={id => void closeTab(id)} onAdd={showPicker} onMove={moveTabById} />
     </div>
     {#each tabs as tab (tab.snapshot.repoId)}
       <div class="gd-workspace" role="tabpanel" id={`repo-panel-${tab.snapshot.repoId}`} aria-labelledby={`repo-tab-${tab.snapshot.repoId}`}

@@ -11,8 +11,9 @@ pub use commit::{
 };
 pub use diff::{
     empty_tree_hash, patch_fingerprint, read_commit_diff, read_index_diff, read_index_patch,
-    read_worktree_diff, read_worktree_patch, select_patch_hunk, select_patch_lines, DiffError,
-    MAX_DIFF_BYTES, MAX_DIFF_LINES, MAX_PREVIEW_BYTES,
+    read_worktree_diff, read_worktree_patch, select_patch_hunk, select_patch_lines,
+    select_patch_lines_staged, DiffError, LinesUnstage, MAX_DIFF_BYTES, MAX_DIFF_LINES,
+    MAX_PREVIEW_BYTES,
 };
 pub use discover::{discover, validate_branch_name, DiscoveredRepo};
 pub use history::{

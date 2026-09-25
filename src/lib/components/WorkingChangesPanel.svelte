@@ -79,7 +79,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions: keydown only delegates ArrowUp/Down/Home/End from an already-focused row button; the div itself takes no interaction -->
 <div class="gd-work-content" bind:this={workContent} onkeydown={fileListKey}>
   <div class="gd-status-bar">
-    <p class="gd-work-summary" title={branchName}><strong>{files === null ? "Reading changes…" : `${files.length} changed`}</strong><span>{branchName}</span>{#if loading && files !== null}<em>Refreshing…</em>{/if}</p>
+    <p class="gd-work-summary" title={branchName}><strong>{files === null ? "Reading changes…" : `${files.length} changed`}</strong><span>{branchName}</span></p>
     <button class="gd-refresh" onclick={onRefresh} disabled={loading} aria-label="Refresh working changes" title="Refresh working changes">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 6a8 8 0 0 1 13 3M5 15a8 8 0 0 0 13 3"/></svg>
       <span>Refresh</span>
