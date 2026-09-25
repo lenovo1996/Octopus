@@ -11,6 +11,8 @@ use crate::domain::OpenWorkspaceEntry;
 use crate::domain::RecentEntry;
 
 pub const SCHEMA_VERSION: u32 = 1;
+// Keep the existing filename when rebranding to Octopus so saved workspaces,
+// preferences, recents and trust remain available without a data migration.
 const FILE_NAME: &str = "gitdock-settings.json";
 const MAX_RECENTS: usize = 20;
 const MAX_OPEN_WORKSPACES: usize = 20;

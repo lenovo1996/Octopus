@@ -1,7 +1,7 @@
 //! Commit-row history actions behind the context menu (T18).
 //!
 //! The 16 commit-menu actions that used to render `Planned` now have typed
-//! IPC commands. Rules mirror docs/05-git-engine.md:
+//! IPC commands. Safety rules:
 //!
 //! - Every mutation takes a `WriteContext` (`repoId` + `expectedVersion`),
 //!   requires a trusted repo, serializes on the per-common-dir queue and

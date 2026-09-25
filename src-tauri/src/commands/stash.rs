@@ -1,6 +1,6 @@
 //! `stash_list` / `stash_save` / `stash_apply` (T12).
 //!
-//! Rules from docs/05-git-engine.md §7 ("Stash"):
+//! Stash safety rules:
 //!
 //! - Tracked-only by default; untracked files enter the stash only with an
 //!   explicit `includeUntracked` flag. Ignored files are never stashed.

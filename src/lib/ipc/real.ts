@@ -20,6 +20,7 @@ import type {
   OperationLogPage,
   OperationRecord,
   OperationStarted,
+  PullRequestResult,
   OpenWorkspaceEntry,
   PreflightData,
   RebasePlanEntry,
@@ -303,6 +304,26 @@ export const realAdapter = {
       expectedVersion,
       remote,
       apiToken
+    });
+  },
+  async pullRequestCreate(
+    repoId: RepoId,
+    expectedVersion: number,
+    remote: string | null,
+    sourceBranch: string,
+    targetBranch: string,
+    title: string,
+    description: string
+  ): Promise<PullRequestResult> {
+    return invokeCommand<PullRequestResult>("pull_request_create", {
+      requestId: newRequestId(),
+      repoId,
+      expectedVersion,
+      remote,
+      sourceBranch,
+      targetBranch,
+      title,
+      description
     });
   },
   async remoteFetch(repoId: RepoId, expectedVersion: number, remote: string | null): Promise<OperationStarted> {

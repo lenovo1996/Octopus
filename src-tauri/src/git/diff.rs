@@ -1,4 +1,4 @@
-//! Unified worktree/index/commit diffs (docs/05-git-engine.md §3).
+//! Unified worktree/index/commit diffs.
 //!
 //! Path identity is always raw bytes carried by listing tokens; display
 //! strings never feed back into Git. Argv travels as OS strings (never a

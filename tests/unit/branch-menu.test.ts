@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildBranchMenuItems } from "../../src/lib/refs/branch-menu";
+import { buildBranchMenuItems, pullRequestTargetName } from "../../src/lib/refs/branch-menu";
 import type { RefItem } from "../../src/lib/ipc/types";
 
 function ref(overrides: Partial<RefItem> = {}): RefItem {
@@ -36,11 +36,51 @@ describe("branch context menu", () => {
       "upstream",
       "push",
       "push-to",
+      "create-pr",
       "copy-name",
       "copy-sha",
       "reveal",
       "delete"
     ]);
+  });
+
+  it("offers pull-request creation toward the clicked branch", () => {
+    const local = buildBranchMenuItems(ref(), ctx, vi.fn(), vi.fn());
+    expect(local.find((item) => item.id === "create-pr")?.label).toBe(
+      "Create pull request to feature…"
+    );
+    const remote = buildBranchMenuItems(
+      ref({ kind: "remote", refId: "refs/remotes/origin/feature", fullName: "refs/remotes/origin/feature", label: "origin/feature" }),
+      ctx,
+      vi.fn(),
+      vi.fn()
+    );
+    const ids = remote.map((item) => item.id);
+    expect(ids).toContain("create-pr");
+    expect(remote.find((item) => item.id === "create-pr")?.label).toBe(
+      "Create pull request to origin/feature…"
+    );
+  });
+
+  it("disables pull-request creation on the current branch", () => {
+    const items = buildBranchMenuItems(ref({ current: true }), ctx, vi.fn(), vi.fn());
+    expect(items.find((item) => item.id === "create-pr")?.disabled).toBe(true);
+    const other = buildBranchMenuItems(ref(), ctx, vi.fn(), vi.fn());
+    expect(other.find((item) => item.id === "create-pr")?.disabled).toBe(false);
+  });
+
+  it("derives the provider target name without the remote prefix", () => {
+    expect(pullRequestTargetName(ref())).toBe("feature");
+    expect(
+      pullRequestTargetName(
+        ref({ kind: "remote", refId: "refs/remotes/origin/feature", fullName: "refs/remotes/origin/feature", label: "origin/feature" })
+      )
+    ).toBe("feature");
+    expect(
+      pullRequestTargetName(
+        ref({ kind: "remote", refId: "refs/remotes/upstream/release/1.0", fullName: "refs/remotes/upstream/release/1.0", label: "upstream/release/1.0" })
+      )
+    ).toBe("release/1.0");
   });
 
   it("keeps local-only actions out of the remote menu", () => {

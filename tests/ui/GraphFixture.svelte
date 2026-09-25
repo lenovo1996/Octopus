@@ -32,7 +32,7 @@
       searchActive={false} searchQuery="" searchRows={[]} searchLoading={false} searchLoadingMore={false}
       searchError={null} searchHasMore={false} searchIncomplete={false}
       onSearchLoadMore={noop} onSearchRetry={noop} onShowInGraph={noop} onClearSearch={noop}
-      onCreateBranch={noop} onCommitAction={noop}
+      onCreateBranch={noop} onCommitAction={noop} branchActionsDisabled={false}
       onSelect={(oid) => (selectedOid = oid)} onRetry={noop} onLoadMore={noop} />
   </div>
 </div>

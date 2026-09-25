@@ -37,6 +37,9 @@
   }
   let workContent: HTMLElement | undefined = $state(undefined);
 
+  // Unstaged/Staged groups collapse via their headers; lists scroll past 250px.
+  let collapsedGroups: Record<FileSide, boolean> = $state({ worktree: false, index: false });
+
   /** ArrowUp/Down (+Home/End) activate the neighbouring file row in visual
    * order, spanning Unstaged and Staged: focus moves and its diff opens,
    * exactly like clicking (or Enter on) the row. Only acts when focus is
@@ -91,8 +94,21 @@
       {@const side = source as FileSide}
       {@const group = side === "worktree" ? changes.unstaged : changes.staged}
       {@const action = side === "worktree" ? "Stage" : "Unstage"}
-      <section class="gd-file-group" aria-label={side === "worktree" ? "Unstaged" : "Staged"}>
-        <div class="gd-group-heading"><h3>{side === "worktree" ? "Unstaged" : "Staged"}<span>{group.length}</span></h3>
+      {@const groupLabel = side === "worktree" ? "Unstaged" : "Staged"}
+      {@const collapsed = collapsedGroups[side]}
+      <section class="gd-file-group" aria-label={groupLabel}>
+        <div class="gd-group-heading">
+          <button
+            type="button"
+            class="gd-group-toggle"
+            aria-expanded={!collapsed}
+            aria-label={`${collapsed ? "Expand" : "Collapse"} ${groupLabel.toLowerCase()} files`}
+            title={`${collapsed ? "Expand" : "Collapse"} ${groupLabel.toLowerCase()} files`}
+            onclick={() => (collapsedGroups = { ...collapsedGroups, [side]: !collapsedGroups[side] })}
+          >
+            <span class="gd-chevron" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+            <span class="gd-group-title">{groupLabel}<span class="gd-count">{group.length}</span></span>
+          </button>
           <div class="gd-group-actions">
             {#if side === "worktree"}
               <button class="gd-text-action gd-danger-action" disabled={disabled || !group.length} onclick={onDiscardAll} aria-label="Discard all unstaged changes" title="Discard all unstaged changes">Discard all</button>
@@ -100,16 +116,20 @@
             <button class="gd-text-action" disabled={disabled || !group.length} onclick={() => (side === "worktree" ? onStage : onUnstage)(group.map(f => f.pathId))}>{action} all</button>
           </div>
         </div>
-        {#if group.length}<ul>{#each group as file (file.pathId)}
-          <FileChangeRow path={file.displayPath} oldPath={file.originalDisplayPath} status={side === "worktree" ? file.worktreeStatus : file.indexStatus}
-            selected={selectedTarget?.kind === side && selectedTarget.pathId === file.pathId}
-            contexted={fileMenu?.file.pathId === file.pathId && fileMenu.side === side}
-            {disabled} {action}
-            onOpen={() => onOpen(file.pathId, side, file.displayPath)}
-            onAction={() => (side === "worktree" ? onStage : onUnstage)([file.pathId])}
-            onDiscard={side === "worktree" ? () => onDiscard(file.pathId) : undefined}
-            onContextMenu={(event) => openFileMenu(event, file, side)} />
-        {/each}</ul>{:else}<p class="gd-empty">{side === "worktree" ? "No unstaged changes." : "Stage files with + to prepare your commit."}</p>{/if}
+        {#if !collapsed}
+        <div class="gd-group-list">
+          {#if group.length}<ul>{#each group as file (file.pathId)}
+            <FileChangeRow path={file.displayPath} oldPath={file.originalDisplayPath} status={side === "worktree" ? file.worktreeStatus : file.indexStatus}
+              selected={selectedTarget?.kind === side && selectedTarget.pathId === file.pathId}
+              contexted={fileMenu?.file.pathId === file.pathId && fileMenu.side === side}
+              {disabled} {action}
+              onOpen={() => onOpen(file.pathId, side, file.displayPath)}
+              onAction={() => (side === "worktree" ? onStage : onUnstage)([file.pathId])}
+              onDiscard={side === "worktree" ? () => onDiscard(file.pathId) : undefined}
+              onContextMenu={(event) => openFileMenu(event, file, side)} />
+          {/each}</ul>{:else}<p class="gd-empty">{side === "worktree" ? "No unstaged changes." : "Stage files with + to prepare your commit."}</p>{/if}
+        </div>
+        {/if}
       </section>
     {/each}
   {/if}
@@ -126,7 +146,6 @@
   {#if identityLabel}<p class="gd-identity" title={identityLabel}>{identityLabel}</p>{/if}
   {#if commitError}<p class="gd-error" role="alert">{commitError.message} Your draft is saved.</p>{/if}
   <button class="gd-commit-button" disabled={!canCommit} title={commitHint} onclick={onCommit}>{commitBusy ? "Committing…" : `Commit ${changes.staged.length} ${changes.staged.length === 1 ? "file" : "files"}`}<span>⌃ ↵</span></button>
-  <p class="gd-commit-hint">{commitHint}</p>
 </footer>
 {#if fileMenu}<ContextMenu x={fileMenu.x} y={fileMenu.y} items={fileMenuItems(fileMenu.file, fileMenu.side)}
   label={`File actions for ${fileMenu.file.displayPath}`} onClose={() => (fileMenu = null)} />{/if}
@@ -142,8 +161,12 @@
   .gd-work-summary em { color: var(--gd-accent); font-style: normal; }
   .gd-file-group { margin-bottom: 14px; }
   .gd-group-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 8px; border-bottom: 1px solid var(--gd-border); margin-bottom: 4px; }
-  h3 { margin: 0; font-size: 12px; font-weight: 600; }
-  h3 span { margin-left: 7px; padding: 1px 5px; background: var(--gd-surface-raised); color: var(--gd-text-secondary); border-radius: 3px; font-size: 10px; }
+  .gd-group-toggle { display: flex; align-items: center; gap: 6px; margin: 0; padding: 2px 4px; background: transparent; border: 0; border-radius: 4px; cursor: pointer; color: var(--gd-text); font-size: 12px; font-weight: 600; }
+  .gd-group-toggle:focus-visible { outline: 2px solid var(--gd-focus); outline-offset: 1px; }
+  .gd-chevron { display: inline-block; width: 1.4ch; color: var(--gd-text-secondary); font-weight: 400; }
+  .gd-group-title .gd-count { margin-left: 7px; padding: 1px 5px; background: var(--gd-surface-raised); color: var(--gd-text-secondary); border-radius: 3px; font-size: 10px; font-weight: 400; }
+  .gd-editor-heading h3 { margin: 0; font-size: 12px; font-weight: 600; }
+  .gd-group-list { height: 260px; overflow-y: auto; overflow-x: hidden; }
   ul { list-style: none; padding: 0; margin: 0; }
   .gd-group-actions { display: flex; align-items: center; gap: 8px; }
   .gd-text-action { border: 0; padding: 3px 4px; background: transparent; color: var(--gd-accent); font-size: 11px; cursor: pointer; }

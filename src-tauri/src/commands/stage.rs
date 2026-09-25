@@ -253,9 +253,9 @@ pub(crate) async fn prepare_discard_confirmation(
             Ok(ConfirmationDetails {
                 confirmation_token: token,
                 summary: if tracked {
-                    format!("Discard all unstaged changes in '{path}' and restore its index version. This cannot be undone by GitDock.")
+                    format!("Discard all unstaged changes in '{path}' and restore its index version. This cannot be undone by Octopus.")
                 } else {
-                    format!("Delete untracked file '{path}'. This cannot be undone by GitDock.")
+                    format!("Delete untracked file '{path}'. This cannot be undone by Octopus.")
                 },
                 expires_at,
             })
@@ -271,7 +271,7 @@ pub(crate) async fn prepare_discard_confirmation(
             Ok(ConfirmationDetails {
                 confirmation_token: token,
                 summary: format!(
-                    "Discard this hunk from '{}'. The selected lines will be restored from the index and cannot be recovered by GitDock.",
+                    "Discard this hunk from '{}'. The selected lines will be restored from the index and cannot be recovered by Octopus.",
                     String::from_utf8_lossy(&raw)
                 ),
                 expires_at,
@@ -286,13 +286,13 @@ pub(crate) async fn prepare_discard_confirmation(
             let short = targets[0].chars().take(7).collect::<String>();
             let summary = match action {
                 "history_reset_hard" => format!(
-                    "Hard-reset the current branch to {short}. Index and worktree files change to match; uncommitted work is destroyed and cannot be recovered by GitDock."
+                    "Hard-reset the current branch to {short}. Index and worktree files change to match; uncommitted work is destroyed and cannot be recovered by Octopus."
                 ),
                 "history_rebase" => format!(
                     "Replay the current branch on top of {short}. Commits are rewritten with new IDs; resolve any conflicts in a terminal."
                 ),
                 "history_rebase_interactive" => format!(
-                    "Rewrite history starting at {short} using your plan. Drops and squashes are permanent without a backup outside GitDock."
+                    "Rewrite history starting at {short} using your plan. Drops and squashes are permanent without a backup outside Octopus."
                 ),
                 _ => format!(
                     "Split {short}: uncommit HEAD into the worktree so its changes can be re-committed in parts. The original commit ID disappears."
@@ -370,7 +370,7 @@ async fn core_mutate(
         argv_with_paths(&["rm", "--cached"], &raw_paths)
     };
     // Plain `run`: GIT_OPTIONAL_LOCKS=0 is a read-only optimization and
-    // must not be used for mutations (docs/05-git-engine.md §1).
+    // must not be used for mutations.
     let out = runner
         .run(&session.worktree_root, &argv, crate::git::WRITE_TIMEOUT)
         .await

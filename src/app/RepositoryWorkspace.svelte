@@ -1,5 +1,5 @@
 <script lang="ts">
-  // GitDock shell: welcome (no session) or 3-column repo view.
+  // Octopus shell: welcome (no session) or 3-column repo view.
   // T03 wires open/init/close/recent/trust to real IPC; T05/T06 wire history
   // and search; T07 wires worktree status with focus/event refresh.
   import { onMount, onDestroy, untrack } from "svelte";
@@ -10,6 +10,7 @@
   import GitToolbar from "../lib/components/GitToolbar.svelte";
   import HelpModal from "../lib/components/HelpModal.svelte";
   import MergeModal from "../lib/components/MergeModal.svelte";
+  import PullRequestModal from "../lib/components/PullRequestModal.svelte";
   import SettingsModal from "../lib/components/SettingsModal.svelte";
   import StashModal from "../lib/components/StashModal.svelte";
   import DiffPane from "../lib/components/DiffPane.svelte";
@@ -21,7 +22,7 @@
   import { COMMIT_ACTION_FORMS } from "../lib/history/commit-action-forms";
   import type { CommitActionId } from "../lib/history/commit-menu";
   import type { BranchFormOverride } from "../lib/history/commit-action-forms";
-  import type { BranchMenuAction } from "../lib/refs/branch-menu";
+  import { pullRequestTargetName, type BranchMenuAction } from "../lib/refs/branch-menu";
   import Inspector from "../lib/components/Inspector.svelte";
   import Sidebar from "../lib/components/Sidebar.svelte";
   import Splitter from "../lib/components/Splitter.svelte";
@@ -45,6 +46,7 @@
     OperationLogEntry,
     OperationRecord,
     PreflightData,
+    PullRequestResult,
     RebasePlanEntry,
     RefItem,
     RemoteStatus,
@@ -848,6 +850,20 @@
   let conflictNotice: string | null = $state(null);
   let mergeSubject = $state("");
   let reviewedStaged = $state(false);
+
+  // Pull request draft (T-PR). Source is always the checked-out branch;
+  // the right-clicked branch is the target.
+  interface PullRequestDraft {
+    source: string;
+    target: string;
+    targets: string[];
+    title: string;
+    description: string;
+    busy: boolean;
+    error: AppError | null;
+    result: PullRequestResult | null;
+  }
+  let pullRequest: PullRequestDraft | null = $state(null);
   let canComplete = $state(false);
   let canAbort = $state(false);
   let abortReason: string | null = $state(null);
@@ -940,6 +956,34 @@
       }
     } finally {
       if (session?.repoId === current.repoId) mergeBusy = false;
+    }
+  }
+
+  async function submitPullRequest(): Promise<void> {
+    if (!session || !pullRequest || pullRequest.busy) return;
+    const draft = pullRequest;
+    const title = draft.title.trim();
+    if (draft.source === "" || draft.target === "" || title === "") return;
+    const current = session;
+    draft.busy = true;
+    draft.error = null;
+    try {
+      const result = await syncAdapter().pullRequestCreate(
+        current.repoId,
+        current.version,
+        null,
+        draft.source,
+        draft.target,
+        title,
+        draft.description
+      );
+      if (pullRequest !== draft) return;
+      draft.result = result;
+    } catch (e) {
+      if (pullRequest !== draft) return;
+      draft.error = e as AppError;
+    } finally {
+      if (pullRequest === draft) draft.busy = false;
     }
   }
 
@@ -1749,6 +1793,28 @@
       case "create-branch":
         openBranchesAt(ref.oid);
         return;
+      case "create-pr": {
+        if (!session) return;
+        const head = session.head;
+        const source = head.kind === "branch" ? head.name : "";
+        const target = pullRequestTargetName(ref);
+        const targets = refs
+          .filter((r) => r.kind === "local" && r.label !== source)
+          .map((r) => r.label)
+          .slice(0, 200);
+        if (target !== "" && !targets.includes(target)) targets.unshift(target);
+        pullRequest = {
+          source,
+          target,
+          targets,
+          title: source !== "" && target !== "" ? `Merge ${source} into ${target}` : "",
+          description: "",
+          busy: false,
+          error: null,
+          result: null
+        };
+        return;
+      }
       case "reveal":
         await showInGraph(ref.oid);
         return;
@@ -2395,7 +2461,7 @@
       hasDraft: !!(shell.commitMessage.trim() || commitBody.trim()),
       changedFiles: statusFiles?.length ?? null,
       hasError: !!(sessionError || indexError || commitError || syncError || conflictActionError),
-      modalOpen: showBranches || showMerge || showStash || showSettings || showHelp || discardConfirm !== null || branchForm !== null || stashSwitch !== null
+      modalOpen: showBranches || showMerge || showStash || showSettings || showHelp || discardConfirm !== null || branchForm !== null || stashSwitch !== null || pullRequest !== null
     };
     untrack(() => onWorkspaceChange(next));
   });
@@ -2598,6 +2664,8 @@
         onSelect={selectCommit}
         onRetry={() => void loadHistory(true)}
         onLoadMore={() => void loadHistory(false)}
+        branchActionsDisabled={busy || branchBusy || session?.trust !== "trusted"}
+        onBranchAction={(action, ref) => void branchAction(action, ref)}
       />
       </div>
       {#if diff.selection}
@@ -2842,6 +2910,37 @@
       onStart={() => void startMerge()}
       onClose={() => (showMerge = false)}
     />
+  {/if}
+  {#if active && pullRequest && session}
+      <PullRequestModal
+        sourceLabel={pullRequest.source === "" ? "(detached HEAD — check out a branch first)" : pullRequest.source}
+        targetSuggestions={pullRequest.targets}
+        targetBranch={pullRequest.target}
+        title={pullRequest.title}
+        description={pullRequest.description}
+        remoteLabel={null}
+        busy={pullRequest.busy}
+        error={pullRequest.error}
+        canSubmit={pullRequest.source !== "" &&
+          pullRequest.target !== "" &&
+          pullRequest.title.trim() !== "" &&
+          pullRequest.source !== pullRequest.target &&
+          !pullRequest.busy}
+        submitHint={pullRequest.source === ""
+          ? "Check out a branch first — pull requests start from the current branch"
+          : pullRequest.source === pullRequest.target
+            ? "Source and target branches must differ"
+            : pullRequest.title.trim() === ""
+              ? "Enter a title"
+              : `Create pull request from ${pullRequest.source} to ${pullRequest.target}`}
+        result={pullRequest.result}
+        onTarget={(value) => pullRequest && (pullRequest.target = value)}
+        onTitle={(value) => pullRequest && (pullRequest.title = value)}
+        onDescription={(value) => pullRequest && (pullRequest.description = value)}
+        onSubmit={() => void submitPullRequest()}
+        onOpenUrl={(url) => void (demo ? window.open(url, "_blank", "noopener,noreferrer") : openUrl(url))}
+        onClose={() => (pullRequest = null)}
+      />
   {/if}
   {#if active && showStash && session}
     <StashModal

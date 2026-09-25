@@ -4,7 +4,7 @@ import process from "node:process";
 
 const host = process.env.TAURI_DEV_HOST;
 
-// https://vite.dev/config/ — plain Vite SPA (no SvelteKit) per docs/03-architecture.md
+// https://vite.dev/config/ — plain Vite SPA (no SvelteKit)
 export default defineConfig(() => ({
   plugins: [svelte()],
 

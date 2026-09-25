@@ -1,8 +1,8 @@
-//! GitDock Rust backend: typed Tauri commands over a Git CLI engine.
+//! Octopus Rust backend: typed Tauri commands over a Git CLI engine.
 //!
-//! Layout follows docs/03-architecture.md: `commands` are thin IPC handlers,
-//! `domain` holds shared IDs/errors/DTOs. Git execution arrives in T03; T01
-//! provides only the envelope types and the `app_preflight` read command.
+//! `commands` are typed IPC handlers, `domain` holds shared IDs/errors/DTOs,
+//! `git` executes system Git, `services` owns sessions/jobs, and
+//! `persistence` stores local settings.
 
 pub mod commands;
 pub mod domain;
@@ -70,6 +70,7 @@ pub fn run() {
             reset_hard,
             confirmation_prepare,
             bitbucket_connect,
+            pull_request_create,
             remote_status,
             remote_fetch,
             remote_pull,
@@ -89,5 +90,5 @@ pub fn run() {
             settings_update
         ])
         .run(tauri::generate_context!())
-        .expect("error while running GitDock");
+        .expect("error while running Octopus");
 }

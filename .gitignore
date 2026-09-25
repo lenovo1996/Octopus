@@ -19,3 +19,7 @@ src-tauri/target/
 
 # Local test artifacts (never commit fixture repos or raw logs)
 .tmp/
+
+# Python tooling cache
+__pycache__/
+*.py[cod]

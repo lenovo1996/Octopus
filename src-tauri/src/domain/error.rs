@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub type RequestId = String;
 pub type OperationId = String;
 
-/// Every variant of docs/04-ipc-contracts.md §1. Serializes as SCREAMING_SNAKE.
+/// IPC error codes shared with src/lib/ipc/types.ts. Serializes as SCREAMING_SNAKE.
 /// The allow is intentional: variant names double as the wire format.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

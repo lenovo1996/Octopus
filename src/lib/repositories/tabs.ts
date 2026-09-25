@@ -56,5 +56,5 @@ export function needsStashOffer(staged: number, unstaged: number, conflicted: nu
 
 /** Fixed stash message so the auto-stash is recognizable in the list. */
 export function autoStashMessage(targetLabel: string): string {
-  return `GitDock auto-stash before switching to ${targetLabel}`;
+  return `Octopus auto-stash before switching to ${targetLabel}`;
 }

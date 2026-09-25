@@ -192,15 +192,6 @@
       <li>
         <button
           type="button"
-          class:active={activeSection === "working"}
-          onclick={() => onSelect("working")}
-        >
-          <span class="gd-section-label">Working changes</span>
-        </button>
-      </li>
-      <li>
-        <button
-          type="button"
           class:active={activeSection === "local"}
           onclick={() => { onSelect("local"); collapsedLocal = !collapsedLocal; }}
           title="Local branches: toggle panel (selects the section to scope the history)"

@@ -8,7 +8,7 @@ use tokio::process::Command as TokioCommand;
 
 use crate::domain::{ApiResult, AppError, ErrorCode, RecoveryAction, RequestId};
 
-/// Minimum supported system Git (docs/10-build-release.md).
+/// Minimum supported system Git (docs/release.md).
 const MIN_GIT_MAJOR: u64 = 2;
 const MIN_GIT_MINOR: u64 = 43;
 

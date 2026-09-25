@@ -76,8 +76,7 @@
     onComplete,
     onAskAbort,
     onConfirmAbort,
-    onCancelAbort,
-    onBack
+    onCancelAbort
   }: Props = $props();
 
   function errorText(e: AppError): string {

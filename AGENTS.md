@@ -1,4 +1,4 @@
-# Hướng dẫn cho AI triển khai GitDock
+# Hướng dẫn cho AI triển khai Octopus
 
 ## CodeGraph
 
@@ -6,9 +6,9 @@ Trong repository có `.codegraph/` tại root, dùng CodeGraph trước khi grep
 
 ## Đọc trước khi sửa
 
-1. Đọc `README.md`, `docs/progress.md`, task được giao trong `docs/07-task-backlog.md` và các spec task đó tham chiếu.
-2. Với UI, xem trực tiếp `example.webp` và `docs/design/`; không chỉ dựa vào mô tả.
-3. Với backend, đọc `docs/04-ipc-contracts.md`, `docs/05-git-engine.md`, `docs/09-security-and-data.md`.
+1. Đọc `README.md` và `docs/development.md`; với build/release, đọc thêm `docs/release.md`.
+2. Với UI, xem màn hình đang chạy và `src/lib/styles/`; dùng icon trong `public/` và `src-tauri/icons/`.
+3. Với backend, đọc typed contracts ở `src/lib/ipc/types.ts`, Rust DTOs/commands và Git engine liên quan; giữ các ràng buộc Git/dữ liệu trong `docs/development.md`.
 4. Xác nhận dependency của task đã hoàn thành; chỉ sửa phần cần thiết cho task hiện tại.
 
 ## Ràng buộc implementation
@@ -16,15 +16,15 @@ Trong repository có `.codegraph/` tại root, dùng CodeGraph trước khi grep
 - Rust + Tauri 2 + Svelte 5 + TypeScript strict + Vite; Linux trước. Không tự đổi stack, thêm server, tài khoản cloud hoặc AI runtime vào sản phẩm.
 - Svelte 5 runes cho state mới. UI không gọi shell, không giữ credentials, không tự coi state cache là Git truth.
 - Mọi thao tác Git qua typed command và Rust Git engine. Không tạo API `run_command(string)` hoặc nhận argv tùy ý từ frontend.
-- Không triển khai P2 khi MVP chưa đạt gate. Không biến mục chưa hỗ trợ thành nút bấm giả; xem quy tắc hiển thị trong UI spec.
+- Không tự mở rộng phạm vi feature. Không biến mục chưa hỗ trợ thành nút bấm giả.
 - Dùng repo tạm cho test mutation. Không dùng repository thật của người dùng làm test fixture.
 - Không chạy `reset --hard`, `clean`, force push, xóa file/repo hoặc thay đổi lịch sử người dùng khi chưa có xác nhận cụ thể. Không tự commit/push/publish thay người dùng.
-- Giữ nguyên tài liệu và `example.webp` khi scaffold. Không xóa thư mục hoặc chạy generator ghi đè để khắc phục lỗi scaffold.
+- Không chạy generator ghi đè project hiện có để khắc phục lỗi scaffold.
 - Không tự spawn subagent. Chỉ chia việc cho agent khi người dùng yêu cầu; mặc định một agent thực hiện task tuần tự.
 
 ## Definition of done mỗi task
 
-Code đúng acceptance criteria; checks liên quan pass; UI có loading/empty/error nếu áp dụng; không có secret trong logs; cập nhật progress và handoff. Nếu môi trường không chạy được check, ghi `blocked` cho gate đó và chỉ rõ nguyên nhân. Không tuyên bố đã kiểm chứng thay cho việc chạy thật.
+Code đúng acceptance criteria; checks liên quan pass; UI có loading/empty/error nếu áp dụng; không có secret trong logs; cập nhật trạng thái/checks/blocker trong `docs/development.md`. Không tạo thêm evidence/handoff theo từng task. Nếu môi trường không chạy được check, ghi `blocked` cho gate đó và chỉ rõ nguyên nhân. Không tuyên bố đã kiểm chứng thay cho việc chạy thật.
 
 ## Output style
 

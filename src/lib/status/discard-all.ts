@@ -40,6 +40,6 @@ export function discardAllSummary(targets: DiscardAllTarget[]): string {
     );
   return (
     `Discard all ${total} unstaged ${total === 1 ? "change" : "changes"} (${parts.join("; ")})? ` +
-    `Staged changes are kept. This cannot be undone by GitDock.`
+    `Staged changes are kept. This cannot be undone by Octopus.`
   );
 }

@@ -81,7 +81,7 @@
     </label>
 
     <p id="bitbucket-storage-note" class="gd-note">
-      GitDock sends the token to your configured Git credential helper through stdin. It is never added to the remote URL, app settings, or logs.
+      Octopus sends the token to your configured Git credential helper through stdin. It is never added to the remote URL, app settings, or logs.
     </p>
 
     {#if error}

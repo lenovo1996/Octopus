@@ -11,7 +11,7 @@ describe("auto-stash offer", () => {
 
   it("names the switch target in the stash message", () => {
     expect(autoStashMessage("feature/ui")).toBe(
-      "GitDock auto-stash before switching to feature/ui"
+      "Octopus auto-stash before switching to feature/ui"
     );
   });
 });

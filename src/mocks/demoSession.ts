@@ -4,10 +4,10 @@ import { demoCommits } from "./demoRepo";
 /** Demo session shaped like a real `repo_open` result (browser mock only). */
 export const demoSession: RepoSnapshot = {
   repoId: "demo-session",
-  workspaceKey: "demo-worktree:/demo/gitdock-demo",
+  workspaceKey: "demo-worktree:/demo/octopus-demo",
   version: 1,
-  displayName: "gitdock-demo",
-  displayPath: "/demo/gitdock-demo",
+  displayName: "octopus-demo",
+  displayPath: "/demo/octopus-demo",
   head: { kind: "branch", refId: "refs/heads/main", name: "main", oid: demoCommits[0].oid },
   trust: "trusted",
   state: "normal",
@@ -21,7 +21,7 @@ export const demoSession: RepoSnapshot = {
 };
 
 export const demoRecents = [
-  { entryId: "/demo/gitdock-demo", key: "/demo/gitdock-demo", displayPath: "/demo/gitdock-demo", lastOpenedAt: 1790000000 },
+  { entryId: "/demo/octopus-demo", key: "/demo/octopus-demo", displayPath: "/demo/octopus-demo", lastOpenedAt: 1790000000 },
   { entryId: "/demo/website", key: "/demo/website", displayPath: "/demo/website", lastOpenedAt: 1789900000 }
 ];
 

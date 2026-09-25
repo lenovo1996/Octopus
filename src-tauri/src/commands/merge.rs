@@ -2,7 +2,7 @@
 //! inspector (`conflict_list`, `conflict_preview`, `conflict_accept`,
 //! `conflict_mark_resolved`) — T13.
 //!
-//! Rules from docs/05-git-engine.md §7 ("Merge và conflict"):
+//! Merge and conflict safety rules:
 //!
 //! - Merge starts only from a branch HEAD, a tracked-clean worktree/index,
 //!   no active operation and no merge already in flight. The source is an

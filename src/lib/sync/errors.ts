@@ -34,7 +34,7 @@ export function syncFailureMessage(
     if (protocol === "ssh") {
       return `${action} authentication was rejected. Start or unlock your SSH agent and verify that its key can access this repository, then retry.`;
     }
-    return `${action} authentication was rejected. Authenticate with your configured credential helper or SSH agent outside GitDock, then retry.`;
+    return `${action} authentication was rejected. Authenticate with your configured credential helper or SSH agent outside Octopus, then retry.`;
   }
   if (code === "OFFLINE") return `${action} could not reach the remote. Check the network connection, then retry.`;
   if (code === "TIMEOUT") return `${action} timed out before Git received a final result. Check the connection and remote state before retrying.`;

@@ -8,11 +8,12 @@
   import { windowRows, type LaidRow } from "../graph/layout";
 
   import ColumnResize from "./ColumnResize.svelte";
-  import { COLUMNS_KEY, COLUMN_LIMITS, clampColumn, defaultColumns, restoreColumns, type HistoryColumn } from "../history/columns";
-  import { refsByCommit, type RefBadge } from "../history/refs";
+  import { COLUMNS_KEY, COLUMN_LIMITS, clampColumn, defaultColumns, formatCommitDate, restoreColumns, type HistoryColumn } from "../history/columns";
+  import { refItemForBadge, refsByCommit, type RefBadge } from "../history/refs";
   import ContextMenu from "./ContextMenu.svelte";
   import { isContextMenuKey, pointFromContextEvent, type ContextMenuItem } from "../context-menu/model";
   import { COMMIT_ACTIONS, type CommitActionId } from "../history/commit-menu";
+  import { buildBranchMenuItems, type BranchMenuAction } from "../refs/branch-menu";
 
   export interface ScopeOption {
     value: string;
@@ -53,6 +54,10 @@
     onSelect: (oid: string) => void;
     onRetry: () => void;
     onLoadMore: () => void;
+    /** Same lock as the sidebar branch menu. */
+    branchActionsDisabled: boolean;
+    /** When set, right-clicking a branch badge opens the branch menu. */
+    onBranchAction?: (action: BranchMenuAction, ref: RefItem) => void;
   }
 
   let {
@@ -63,15 +68,12 @@
     loadingMore,
     error,
     hasMore,
-    pageTruncated,
     totalHint,
     emptyHint,
     selectedOid,
     refLabels,
     refs = [],
     scopeValue,
-    scopeOptions,
-    onScopeChange,
     searchActive,
     searchQuery,
     searchRows,
@@ -79,7 +81,6 @@
     searchLoadingMore,
     searchError,
     searchHasMore,
-    searchIncomplete,
     onSearchLoadMore,
     onSearchRetry,
     onShowInGraph,
@@ -88,7 +89,9 @@
     onCommitAction,
     onSelect,
     onRetry,
-    onLoadMore
+    onLoadMore,
+    branchActionsDisabled,
+    onBranchAction
   }: Props = $props();
 
   const rowHeight = 28;
@@ -105,6 +108,7 @@
   // Keyboard focus ring, separate from the details selection.
   let focusOid: string | null = $state(null);
   let rowMenu = $state<{ row: CommitRow; x: number; y: number } | null>(null);
+  let badgeMenu = $state<{ ref: RefItem; x: number; y: number } | null>(null);
 
   const laidByOid = $derived(new Map(laid.map((r) => [r.oid, r])));
   const window = $derived(windowRows(activeRows(), scrollTop, Math.max(0, viewportHeight - headerHeight), rowHeight, overscan));
@@ -114,18 +118,19 @@
   const graphContentWidth = $derived(Math.max(graphWidth, laneCount * laneWidth + 16));
   const branchWidth = $derived(columns.branches ?? 150);
   const authorWidth = $derived(columns.author ?? 140);
-  const subjectWidth = $derived(columns.subject ?? Math.max(200, viewportWidth - authorWidth - (searchActive ? 110 : graphWidth + branchWidth)));
-  const tableWidth = $derived(subjectWidth + authorWidth + (searchActive ? 110 : graphWidth + branchWidth));
-  const columnTemplate = $derived(`${searchActive ? "" : `${branchWidth}px ${graphWidth}px `}${subjectWidth}px ${authorWidth}px${searchActive ? " 110px" : ""}`);
+  const dateWidth = $derived(columns.date ?? 120);
+  const subjectWidth = $derived(columns.subject ?? Math.max(200, viewportWidth - authorWidth - (searchActive ? 110 : graphWidth + branchWidth + dateWidth)));
+  const tableWidth = $derived(subjectWidth + authorWidth + (searchActive ? 110 : graphWidth + branchWidth + dateWidth));
+  const columnTemplate = $derived(`${searchActive ? "" : `${branchWidth}px ${graphWidth}px `}${subjectWidth}px ${authorWidth}px${searchActive ? " 110px" : ` ${dateWidth}px`}`);
   const badgesByOid = $derived(refsByCommit(refs));
-  const headerColumns = $derived((searchActive ? ["subject", "author"] : ["branches", "graph", "subject", "author"]) as HistoryColumn[]);
-  const labels = { branches: "Branch", graph: "Graph", subject: "Subject", author: "Author" };
+  const headerColumns = $derived((searchActive ? ["subject", "author"] : ["branches", "graph", "subject", "author", "date"]) as HistoryColumn[]);
+  const labels = { branches: "Branch", graph: "Graph", subject: "Subject", author: "Author", date: "Date" };
 
   onMount(() => {
     try { columns = restoreColumns(localStorage.getItem(COLUMNS_KEY)); } catch { /* Storage unavailable. */ }
   });
   function widthOf(column: HistoryColumn): number {
-    return { branches: branchWidth, graph: graphWidth, subject: subjectWidth, author: authorWidth }[column];
+    return { branches: branchWidth, graph: graphWidth, subject: subjectWidth, author: authorWidth, date: dateWidth }[column];
   }
   function resizeColumn(column: HistoryColumn, delta: number): void {
     columns = { ...columns, [column]: clampColumn(column, widthOf(column) + delta) };
@@ -174,6 +179,7 @@
 
   function onScroll(e: Event): void {
     rowMenu = null;
+    badgeMenu = null;
     const el = e.currentTarget as HTMLElement;
     scrollTop = el.scrollTop;
     viewportHeight = el.clientHeight;
@@ -192,9 +198,32 @@
   function openRowMenu(event: MouseEvent | KeyboardEvent, row: CommitRow): void {
     event.preventDefault();
     event.stopPropagation();
+    badgeMenu = null;
     focusOid = row.oid;
     const point = pointFromContextEvent(event);
     rowMenu = { row, x:point.left, y:point.top };
+  }
+
+  function openBadgeMenu(event: MouseEvent, badge: RefBadge): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!onBranchAction) return;
+    const ref = refItemForBadge(refs, badge);
+    if (!ref) return;
+    rowMenu = null;
+    const point = pointFromContextEvent(event);
+    badgeMenu = { ref, x: point.left, y: point.top };
+  }
+
+  function badgeMenuItems(ref: RefItem): ContextMenuItem[] {
+    return buildBranchMenuItems(
+      ref,
+      { actionsDisabled: branchActionsDisabled, selectedCommitOid: selectedOid },
+      (action, target) => onBranchAction?.(action, target),
+      (text) => {
+        void navigator.clipboard.writeText(text);
+      }
+    );
   }
   function rowMenuKey(event: KeyboardEvent, row: CommitRow): void {
     if (isContextMenuKey(event)) openRowMenu(event, row);
@@ -361,7 +390,8 @@
             {#if !searchActive}
               <span class="gd-branches" title={badges.map(b => b.fullName).join("\n")}>
                 {#each badges.slice(0, 2) as badge (badge.id)}
-                  <span class="gd-ref-badge" class:remote={badge.kind === "remote"} class:tag={badge.kind === "tag"}>
+                  <span class="gd-ref-badge" class:remote={badge.kind === "remote"} class:tag={badge.kind === "tag"}
+                    oncontextmenu={(event) => openBadgeMenu(event, badge)}>
                     <span class="gd-ref-source">{badge.source}</span><span class="gd-ref-name">{badge.name}</span>
                     {#if badge === badges[0] && badges.length > 2}<span class="gd-ref-extra">+{badges.length - 2}</span>{/if}
                   </span>
@@ -413,6 +443,9 @@
             {/if}
             <span class="gd-subject" title={row.subject}>{#if row.boundary}<span title="Shallow boundary">◇ </span>{/if}{row.subject}</span>
             <span class="gd-author" title={`${row.authorName} · ${row.committedAt} · ${row.oid}`}>{row.authorName}<small>{shortOid(row.oid)}</small></span>
+            {#if !searchActive}
+              <span class="gd-date" title={row.committedAt}>{formatCommitDate(row.committedAt)}</span>
+            {/if}
           </button>
           {#if searchActive}<button class="gd-show-graph" onclick={() => onShowInGraph(row.oid)}>Show in graph</button>{/if}
         </div>
@@ -424,6 +457,8 @@
   </div>
   {#if rowMenu}<ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems(rowMenu.row)}
     label={`Commit actions for ${shortOid(rowMenu.row.oid)}`} onClose={() => (rowMenu = null)} />{/if}
+  {#if badgeMenu}<ContextMenu x={badgeMenu.x} y={badgeMenu.y} items={badgeMenuItems(badgeMenu.ref)}
+    label={`Branch actions for ${badgeMenu.ref.label}`} onClose={() => (badgeMenu = null)} />{/if}
 </section>
 
 <style>
@@ -467,6 +502,7 @@
   .gd-subject { min-width: 0; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gd-author { display: flex; flex-direction: column; min-width: 0; padding: 0 12px; color: var(--gd-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--gd-font-size-small); line-height: 14px; }
   .gd-author small { font: 10px/12px var(--gd-font-code); opacity: .75; }
+  .gd-date { min-width: 0; padding: 0 12px; color: var(--gd-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--gd-font-size-small); }
   .gd-show-graph { position: absolute; right: 7px; top: 4px; font-size: 11px; }
   .gd-state { padding: 20px; color: var(--gd-text-secondary); }
   .gd-more { padding: 8px 12px; color: var(--gd-text-secondary); }

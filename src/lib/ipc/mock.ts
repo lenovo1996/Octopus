@@ -27,6 +27,7 @@ import type {
   OperationLogPage,
   OperationRecord,
   OperationStarted,
+  PullRequestResult,
   PreflightData,
   RemoteStatus,
   StashApplyResult,
@@ -165,14 +166,14 @@ const mockAdapter = {
       const file = mockWorktree(repoId).find((row) => row.pathId === targets[0]);
       if (!file) throw staleMockError("The file list changed.");
       mockConfirmTokens.set(token, `discard_file:${targets[0]}`);
-      return { confirmationToken: token, summary: `Discard all unstaged changes in '${file.displayPath}'. This cannot be undone by GitDock.`, expiresAt: Date.now() + 60000 };
+      return { confirmationToken: token, summary: `Discard all unstaged changes in '${file.displayPath}'. This cannot be undone by Octopus.`, expiresAt: Date.now() + 60000 };
     }
     if (action === "discard_hunk") {
       if (targets.length !== 2) throw staleMockError("Discard hunk confirms one hunk.");
       const file = mockWorktree(repoId).find((row) => row.pathId === targets[0]);
       if (!file) throw staleMockError("The file list changed.");
       mockConfirmTokens.set(token, `discard_hunk:${targets.join("\0")}`);
-      return { confirmationToken: token, summary: `Discard this hunk from '${file.displayPath}' and restore its lines from the index. This cannot be undone by GitDock.`, expiresAt: Date.now() + 60000 };
+      return { confirmationToken: token, summary: `Discard this hunk from '${file.displayPath}' and restore its lines from the index. This cannot be undone by Octopus.`, expiresAt: Date.now() + 60000 };
     }
     if (action === "conflict_accept") {
       if (targets.length !== 2) throw staleMockError("Conflict accept confirms one file and one side.");
@@ -355,6 +356,22 @@ const mockAdapter = {
       remoteName: "origin",
       username: "x-bitbucket-api-token-auth",
       credentialSaved: true
+    };
+  },
+  async pullRequestCreate(
+    _repoId: string,
+    _expectedVersion: number,
+    _remote: string | null,
+    _sourceBranch: string,
+    _targetBranch: string,
+    _title: string,
+    _description: string
+  ): Promise<PullRequestResult> {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    return {
+      provider: "github",
+      url: "https://example.com/demo/app/pull/7",
+      reference: "#7"
     };
   },
   async remoteFetch(_repoId: string, _expectedVersion: number, _remote: string | null): Promise<OperationStarted> {

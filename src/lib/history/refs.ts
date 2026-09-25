@@ -11,6 +11,15 @@ export function refBadge(ref: RefItem): RefBadge {
   return { id: ref.refId, name: ref.label, source: kind === "tag" ? "tag" : "local", kind: kind === "tag" ? "tag" : "local", fullName: ref.fullName };
 }
 
+/**
+ * Resolve a rendered graph badge back to its RefItem. Badge ids are the
+ * ref's refId, so the sidebar branch menu (including create-pr) can run
+ * directly from a graph badge. Null when the badge is stale.
+ */
+export function refItemForBadge(refs: RefItem[], badge: Pick<RefBadge, "id">): RefItem | null {
+  return refs.find((ref) => ref.refId === badge.id) ?? null;
+}
+
 export function refsByCommit(refs: RefItem[]): Map<string, RefBadge[]> {
   const result = new Map<string, RefBadge[]>();
   for (const ref of refs) {

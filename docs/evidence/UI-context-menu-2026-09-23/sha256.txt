@@ -1,4 +1,0 @@
-1d45a179e7740ca513d8ebe26dbc74199aaadc24966ab7c0f7c358436811a972  src-tauri/target/release/gitdock
-cbce2f62e5aadf3855f98d6cb559d50184bf90579bef3bf43f10909669d16850  src-tauri/target/release/bundle/deb/GitDock_0.1.0_amd64.deb
-7f268452427a6d701d7a6f53a520bcd2f720e7c87d915bfd508ce30fd9b9d93a  src-tauri/target/release/bundle/rpm/GitDock-0.1.0-1.x86_64.rpm
-8c1ea420a7cdf25cdbae608d52c7458573c7442e1396d8cd6052a36900133c74  src-tauri/target/release/bundle/appimage/GitDock_0.1.0_amd64.AppImage

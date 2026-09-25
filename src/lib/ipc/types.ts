@@ -1,4 +1,4 @@
-// IPC v1 foundation types — canonical contract lives in docs/04-ipc-contracts.md.
+// IPC v1 contracts — keep aligned with Rust domain types and command DTOs.
 // Rust DTOs (src-tauri/src/domain) are canonical; this file must stay in parity
 // (field names camelCase, same union variants). Covered by tests/unit/ipc.test.ts.
 
@@ -289,6 +289,14 @@ export interface BitbucketConnectionResult {
   remoteName: string;
   username: string;
   credentialSaved: boolean;
+}
+
+export interface PullRequestResult {
+  /** "bitbucket" | "github" | "gitlab". */
+  provider: string;
+  url: string;
+  /** "#7" (PR) or "!3" (GitLab MR). */
+  reference: string;
 }
 
 export interface OperationStarted {

@@ -373,7 +373,7 @@ async fn core_confirmation_prepare(
         let short_new: String = targets[1].chars().take(7).collect();
         let short_old: String = target.oid.chars().take(7).collect();
         let summary = format!(
-            "Move branch '{name}' from {short_old} to {short_new}. Commits left behind stay reachable from the reflog for a while, but GitDock keeps no backup."
+            "Move branch '{name}' from {short_old} to {short_new}. Commits left behind stay reachable from the reflog for a while, but Octopus keeps no backup."
         );
         let (token, expires_at) =
             registry.confirmation_issue(repo_id, session.version, action, targets.to_vec());

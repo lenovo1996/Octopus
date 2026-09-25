@@ -1,7 +1,7 @@
 //! Remote sync plumbing: URL policy, upstream resolution, ahead/behind,
 //! network error classification and progress parsing (T11).
 //!
-//! URL policy (docs/05-git-engine.md §5): HTTPS, SSH, SCP-like SSH and
+//! URL policy: HTTPS, SSH, SCP-like SSH and
 //! local folders pass. `ext::`, unknown schemes, inline passwords and
 //! custom transport helpers are rejected. Logs and UI only ever see the
 //! redacted form (no userinfo password, no query/fragment).

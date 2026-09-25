@@ -82,7 +82,7 @@ export const demoCommits: DemoCommit[] = [
 export const demoUnstaged: DemoFile[] = [
   { path: "src/app/App.svelte", indexStatus: " ", worktreeStatus: "M", staged: false, conflicted: false },
   { path: "src/lib/ipc/client.ts", indexStatus: "M", worktreeStatus: "M", staged: false, conflicted: false },
-  { path: "docs/progress.md", indexStatus: " ", worktreeStatus: "?", staged: false, conflicted: false }
+  { path: "docs/development.md", indexStatus: " ", worktreeStatus: "?", staged: false, conflicted: false }
 ];
 
 export const demoStaged: DemoFile[] = [

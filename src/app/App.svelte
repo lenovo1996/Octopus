@@ -122,7 +122,7 @@
   async function browse() {
     if (opening) return;
     if (demo) {
-      const path = demoIndex++ === 0 && !tabs.length ? "/demo/gitdock-demo" : `/demo/project-${demoIndex}`;
+      const path = demoIndex++ === 0 && !tabs.length ? "/demo/octopus-demo" : `/demo/project-${demoIndex}`;
       await openPaths([path]);
       return;
     }

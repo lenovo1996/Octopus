@@ -51,7 +51,7 @@
 </script>
 
 <nav class="gd-repositories" aria-label="Repository workspace">
-  <span class="gd-brand" title="Open repositories">GitDock<span>{tabs.length}</span></span>
+  <span class="gd-brand" title="Open repositories"><img src="/brand/octopus-128.png" alt="" width="28" height="28" />Octopus<span>{tabs.length}</span></span>
   <div class="gd-tabs" role="tablist" aria-label="Open repositories" bind:this={list}>
     {#each tabs as tab (tab.snapshot.repoId)}
       {@const repo = tab.snapshot}
@@ -90,6 +90,7 @@
   .gd-repositories { flex: 0 0 49px; display: flex; align-items: stretch; background: var(--gd-canvas); border-bottom: 1px solid var(--gd-border); min-width: 0; }
   .gd-brand { display: flex; align-items: center; gap: 8px; padding: 0 16px; font-size: 12px; font-weight: 600; color: var(--gd-text-secondary); }
   .gd-brand>span { font: 10px var(--gd-font-code); opacity: .65; }
+  .gd-brand img { flex: 0 0 auto; }
   .gd-tabs { display: flex; overflow-x: auto; min-width: 0; scrollbar-width: thin; flex: 1; }
   .gd-tab-wrap { display: flex; align-items: center; flex: 0 0 auto; max-width: 290px; min-width: 174px; border-right: 1px solid var(--gd-border); border-top: 2px solid transparent; padding-right: 7px; }
   .gd-tab-wrap.selected { background: var(--gd-panel); border-top-color: var(--gd-accent); }

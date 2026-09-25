@@ -202,7 +202,7 @@ fn network_error(stderr: &str) -> AppError {
         ),
         NetworkFault::Auth => AppError::new(
             ErrorCode::AUTH_REQUIRED,
-            "Authentication was rejected. Refresh your HTTPS credentials or unlock your SSH key outside GitDock, then retry",
+            "Authentication was rejected. Refresh your HTTPS credentials or unlock your SSH key outside Octopus, then retry",
             RecoveryAction::Authenticate,
             false,
         ),
@@ -924,7 +924,7 @@ pub async fn bitbucket_connect(
             .map_err(|_| {
                 AppError::new(
                     ErrorCode::IO_ERROR,
-                    "GitDock could not inspect the Git credential helper",
+                    "Octopus could not inspect the Git credential helper",
                     RecoveryAction::ConfigureGit,
                     false,
                 )
@@ -1081,11 +1081,602 @@ pub async fn operation_log(
     })
 }
 
+/// Create a pull (merge) request on the hosting provider.
+///
+/// Multi-provider by remote host: `github.com`, `bitbucket.org`,
+/// `gitlab.com`. Credentials are never stored by Octopus for this flow: they
+/// are read back from the user's configured Git credential helper
+/// (`git credential fill`, non-interactive) and travel only in the
+/// Authorization header of a single TLS request. Nothing secret is logged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrProvider {
+    Bitbucket,
+    GitHub,
+    GitLab,
+}
+
+impl PrProvider {
+    fn name(self) -> &'static str {
+        match self {
+            PrProvider::Bitbucket => "bitbucket",
+            PrProvider::GitHub => "github",
+            PrProvider::GitLab => "gitlab",
+        }
+    }
+}
+
+/// Owner/workspace + repository coordinates parsed from a remote URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PrCoords {
+    provider: PrProvider,
+    /// API base without trailing slash (`https://api.github.com`,
+    /// `https://api.bitbucket.org/2.0`, `https://<host>/api/v4`).
+    api_base: String,
+    /// `owner`, `workspace`, or full subgroup path (`group/sub`).
+    namespace: String,
+    repo: String,
+}
+
+/// Split `owner/repo(.git)`-style paths; rejects empty segments.
+fn split_namespace_repo(path: &str) -> Option<(String, String)> {
+    let trimmed = path.trim_matches('/');
+    let (namespace, repo) = trimmed.rsplit_once('/')?;
+    if namespace.is_empty() || repo.is_empty() {
+        return None;
+    }
+    if namespace.split('/').any(str::is_empty) {
+        return None;
+    }
+    Some((namespace.to_string(), repo.to_string()))
+}
+
+/// Normalize a remote URL into provider coordinates. Accepts HTTPS and
+/// `git@host:path` SSH forms; SSH remotes still need an HTTPS credential
+/// saved for the host (see [`pr_credential`]).
+fn detect_pr_provider(remote_url: &str) -> Option<PrCoords> {
+    // Config output trails a newline; trim first, then reject controls.
+    let url = remote_url.trim();
+    if url.chars().any(char::is_control) {
+        return None;
+    }
+    // SSH short form: `git@github.com:owner/repo.git`.
+    if let Some(after_at) = url.split_once('@') {
+        if after_at.0.is_empty() || after_at.0.contains('/') || after_at.0.contains(':') {
+            return None;
+        }
+        let (host, mut path) = after_at.1.split_once(':')?;
+        if host.is_empty() || path.is_empty() || path.contains("://") {
+            return None;
+        }
+        path = path
+            .split(['?', '#'])
+            .next()
+            .unwrap_or("")
+            .trim_matches('/');
+        path = path.strip_suffix(".git").unwrap_or(path);
+        return coords_for_host(host, path, false);
+    }
+    let (scheme, rest) = url.split_once("://")?;
+    if !(scheme.eq_ignore_ascii_case("https") || scheme.eq_ignore_ascii_case("http")) {
+        return None;
+    }
+    // Strip optional userinfo.
+    let rest = rest
+        .rsplit_once('@')
+        .map(|(_, after)| after)
+        .unwrap_or(rest);
+    let (authority, mut path) = rest.split_once('/')?;
+    let host = authority.split(':').next().unwrap_or("");
+    if host.is_empty() {
+        return None;
+    }
+    path = path
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_matches('/');
+    path = path.strip_suffix(".git").unwrap_or(path);
+    coords_for_host(host, path, true)
+}
+
+fn coords_for_host(host: &str, path: &str, _https: bool) -> Option<PrCoords> {
+    if path.is_empty() {
+        return None;
+    }
+    let (namespace, repo) = split_namespace_repo(path)?;
+    if host.eq_ignore_ascii_case("github.com") {
+        if namespace.contains('/') {
+            return None;
+        }
+        Some(PrCoords {
+            provider: PrProvider::GitHub,
+            api_base: "https://api.github.com".to_string(),
+            namespace,
+            repo,
+        })
+    } else if host.eq_ignore_ascii_case("bitbucket.org") {
+        if namespace.contains('/') {
+            return None;
+        }
+        Some(PrCoords {
+            provider: PrProvider::Bitbucket,
+            api_base: "https://api.bitbucket.org/2.0".to_string(),
+            namespace,
+            repo,
+        })
+    } else if host.eq_ignore_ascii_case("gitlab.com") {
+        Some(PrCoords {
+            provider: PrProvider::GitLab,
+            api_base: "https://gitlab.com/api/v4".to_string(),
+            namespace,
+            repo,
+        })
+    } else {
+        None
+    }
+}
+
+/// Percent-encode a GitLab project path (`group/sub/repo` -> `group%2Fsub%2Frepo`).
+fn gitlab_encode_project(namespace: &str, repo: &str) -> String {
+    fn encode(segment: &str) -> String {
+        let mut out = String::with_capacity(segment.len());
+        for byte in segment.bytes() {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+                out.push(byte as char);
+            } else {
+                out.push_str(&format!("%{byte:02X}"));
+            }
+        }
+        out
+    }
+    namespace
+        .split('/')
+        .chain(std::iter::once(repo))
+        .map(encode)
+        .collect::<Vec<_>>()
+        .join("%2F")
+}
+
+fn check_pr_text(value: &str, field: &str, max_len: usize) -> Result<String, AppError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.len() > max_len || trimmed.chars().any(char::is_control) {
+        return Err(bad_request(format!("{field} is empty or invalid")));
+    }
+    Ok(trimmed.to_string())
+}
+
+async fn check_branch_name(
+    runner: &GitRunner,
+    cwd: &std::path::Path,
+    name: &str,
+) -> Result<String, AppError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed.len() > 250 || trimmed.chars().any(char::is_control) {
+        return Err(bad_request("Branch name is empty or invalid"));
+    }
+    let out = runner
+        .run(
+            cwd,
+            &["check-ref-format", "--branch", trimmed],
+            std::time::Duration::from_secs(15),
+        )
+        .await
+        .map_err(|_| bad_request("Could not validate the branch name"))?;
+    if !out.success {
+        return Err(bad_request("Branch name is not a valid Git branch name"));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Read a saved credential back via `git credential fill` (non-interactive;
+/// never prompts). Returns `(username, password)`.
+async fn pr_credential(
+    runner: &GitRunner,
+    cwd: &std::path::Path,
+    host: &str,
+) -> Result<(String, String), AppError> {
+    let input = format!("protocol=https\nhost={host}\n\n");
+    let out = runner
+        .run_with_stdin(
+            cwd,
+            &["credential", "fill"],
+            input.as_bytes(),
+            std::time::Duration::from_secs(15),
+        )
+        .await
+        .map_err(|e| match e {
+            crate::git::runner::RunError::TimedOut => AppError::new(
+                ErrorCode::TIMEOUT,
+                "Reading the saved credential timed out",
+                RecoveryAction::Refresh,
+                true,
+            ),
+            _ => AppError::new(
+                ErrorCode::AUTH_REQUIRED,
+                "No saved credential for this host. Save one first (Bitbucket: Connect in the push flow; GitHub/GitLab: store a token with your Git credential helper).",
+                RecoveryAction::Authenticate,
+                false,
+            ),
+        })?;
+    if !out.success {
+        return Err(AppError::new(
+            ErrorCode::AUTH_REQUIRED,
+            "No saved credential for this host. Save one first (Bitbucket: Connect in the push flow; GitHub/GitLab: store a token with your Git credential helper).",
+            RecoveryAction::Authenticate,
+            false,
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut username = String::new();
+    let mut password = String::new();
+    for line in stdout.lines() {
+        if let Some(value) = line.strip_prefix("username=") {
+            username = value.trim().to_string();
+        } else if let Some(value) = line.strip_prefix("password=") {
+            password = value.trim().to_string();
+        }
+    }
+    if password.is_empty()
+        || password.len() > 4096
+        || password.chars().any(char::is_control)
+        || username.len() > 1024
+        || username.chars().any(char::is_control)
+    {
+        return Err(AppError::new(
+            ErrorCode::AUTH_REQUIRED,
+            "No saved credential for this host. Save one first (Bitbucket: Connect in the push flow; GitHub/GitLab: store a token with your Git credential helper).",
+            RecoveryAction::Authenticate,
+            false,
+        ));
+    }
+    Ok((username, password))
+}
+
+fn pr_request_json(
+    provider: PrProvider,
+    title: &str,
+    description: &str,
+    source: &str,
+    target: &str,
+) -> serde_json::Value {
+    match provider {
+        PrProvider::GitHub => serde_json::json!({
+            "title": title,
+            "head": source,
+            "base": target,
+            "body": description,
+        }),
+        PrProvider::Bitbucket => serde_json::json!({
+            "title": title,
+            "description": description,
+            "source": { "branch": { "name": source } },
+            "destination": { "branch": { "name": target } },
+        }),
+        PrProvider::GitLab => serde_json::json!({
+            "title": title,
+            "description": description,
+            "source_branch": source,
+            "target_branch": target,
+        }),
+    }
+}
+
+fn pr_endpoint(coords: &PrCoords) -> String {
+    match coords.provider {
+        PrProvider::GitHub => format!(
+            "{}/repos/{}/{}/pulls",
+            coords.api_base, coords.namespace, coords.repo
+        ),
+        PrProvider::Bitbucket => format!(
+            "{}/repositories/{}/{}/pullrequests",
+            coords.api_base, coords.namespace, coords.repo
+        ),
+        PrProvider::GitLab => format!(
+            "{}/projects/{}/merge_requests",
+            coords.api_base,
+            gitlab_encode_project(&coords.namespace, &coords.repo)
+        ),
+    }
+}
+
+/// Pull the PR URL + reference out of a provider response (size-bounded).
+fn pr_parse_response(provider: PrProvider, body: &[u8]) -> Result<(String, String), AppError> {
+    if body.len() > 1024 * 1024 {
+        return Err(AppError::new(
+            ErrorCode::OUTPUT_LIMIT,
+            "Provider response exceeded the safety bound",
+            RecoveryAction::RetryRead,
+            false,
+        ));
+    }
+    let json: serde_json::Value = serde_json::from_slice(body).map_err(|_| {
+        AppError::new(
+            ErrorCode::NETWORK_ERROR,
+            "Provider returned an unreadable response",
+            RecoveryAction::Refresh,
+            false,
+        )
+    })?;
+    let invalid = || {
+        AppError::new(
+            ErrorCode::NETWORK_ERROR,
+            "Provider returned an unreadable response",
+            RecoveryAction::Refresh,
+            false,
+        )
+    };
+    let (url, reference) = match provider {
+        PrProvider::GitHub => (
+            json.get("html_url").and_then(|v| v.as_str()).unwrap_or(""),
+            json.get("number")
+                .and_then(|v| v.as_u64())
+                .map(|n| format!("#{n}"))
+                .unwrap_or_default(),
+        ),
+        PrProvider::Bitbucket => (
+            json.pointer("/links/html/href")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            json.get("id")
+                .and_then(|v| v.as_u64())
+                .map(|n| format!("#{n}"))
+                .unwrap_or_default(),
+        ),
+        PrProvider::GitLab => (
+            json.get("web_url").and_then(|v| v.as_str()).unwrap_or(""),
+            json.get("iid")
+                .and_then(|v| v.as_u64())
+                .map(|n| format!("!{n}"))
+                .unwrap_or_default(),
+        ),
+    };
+    if url.is_empty() || reference.is_empty() || !url.starts_with("https://") {
+        return Err(invalid());
+    }
+    Ok((url.to_string(), reference))
+}
+
+fn pr_http_error(status: reqwest::StatusCode, provider: PrProvider, body: &[u8]) -> AppError {
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return AppError::new(
+            ErrorCode::AUTH_REQUIRED,
+            "The provider rejected the saved credential. Update it, then retry.",
+            RecoveryAction::Authenticate,
+            false,
+        );
+    }
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return AppError::new(
+            ErrorCode::INVALID_ARGUMENT,
+            "Repository or branch not found on the provider. Push the branches first.",
+            RecoveryAction::InspectState,
+            false,
+        );
+    }
+    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+        || status == reqwest::StatusCode::BAD_REQUEST
+    {
+        let hint = serde_json::from_slice::<serde_json::Value>(body)
+            .ok()
+            .and_then(|json| {
+                json.get("message")
+                    .or_else(|| json.get("error"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .filter(|message| {
+                !message.is_empty()
+                    && message.len() <= 300
+                    && !message.chars().any(char::is_control)
+            })
+            .map(|message| format!(" Provider says: {message}"))
+            .unwrap_or_default();
+        return AppError::new(
+            ErrorCode::INVALID_ARGUMENT,
+            format!(
+                "The provider refused the {} (maybe it already exists).{hint}",
+                match provider {
+                    PrProvider::GitLab => "merge request",
+                    _ => "pull request",
+                }
+            ),
+            RecoveryAction::InspectState,
+            false,
+        );
+    }
+    AppError::new(
+        ErrorCode::NETWORK_ERROR,
+        format!("Provider request failed (HTTP {})", status.as_u16()),
+        RecoveryAction::Refresh,
+        false,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCreateRequest {
+    pub request_id: RequestId,
+    pub repo_id: String,
+    pub expected_version: u64,
+    pub remote: Option<String>,
+    pub source_branch: String,
+    pub target_branch: String,
+    pub title: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PullRequestResult {
+    pub provider: String,
+    pub url: String,
+    pub reference: String,
+}
+
+async fn core_pull_request_create(
+    runner: &GitRunner,
+    registry: &RepoRegistry,
+    http: &reqwest::Client,
+    api_base_override: Option<&str>,
+    request: &PullRequestCreateRequest,
+    cwd: &std::path::Path,
+) -> Result<PullRequestResult, AppError> {
+    let remote_name = match request.remote.as_deref() {
+        Some(name) => {
+            check_remote_name(name)?;
+            name.to_string()
+        }
+        None => default_remote(runner, registry, &request.repo_id).await?,
+    };
+    let raw_url = checked_raw_remote_url(runner, cwd, &remote_name).await?;
+    let mut coords = detect_pr_provider(&raw_url).ok_or_else(|| {
+        AppError::new(
+            ErrorCode::UNSUPPORTED,
+            "Pull requests support github.com, bitbucket.org and gitlab.com remotes",
+            RecoveryAction::InspectState,
+            false,
+        )
+    })?;
+    if let Some(base) = api_base_override {
+        coords.api_base = base.trim_end_matches('/').to_string();
+    }
+    let source = check_branch_name(runner, cwd, &request.source_branch).await?;
+    let target = check_branch_name(runner, cwd, &request.target_branch).await?;
+    if source == target {
+        return Err(bad_request("Source and target branches must differ"));
+    }
+    let title = check_pr_text(&request.title, "Title", 512)?;
+    let description = if request.description.trim().is_empty() {
+        String::new()
+    } else {
+        check_pr_text(&request.description, "Description", 65536)?
+    };
+    let host = raw_url_host(&raw_url).unwrap_or_default();
+    let (_username, password) = pr_credential(runner, cwd, &host).await?;
+    let endpoint = pr_endpoint(&coords);
+    let payload = pr_request_json(coords.provider, &title, &description, &source, &target);
+    let mut builder = http
+        .post(&endpoint)
+        .header("User-Agent", "Octopus/0.1")
+        .header("Accept", "application/json")
+        .json(&payload);
+    builder = match coords.provider {
+        PrProvider::GitLab => builder.header("PRIVATE-TOKEN", password),
+        _ => builder.bearer_auth(password),
+    };
+    let response = builder.send().await.map_err(|e| {
+        if e.is_timeout() {
+            AppError::new(
+                ErrorCode::TIMEOUT,
+                "Provider request timed out",
+                RecoveryAction::Refresh,
+                false,
+            )
+        } else {
+            AppError::new(
+                ErrorCode::NETWORK_ERROR,
+                "Could not reach the provider",
+                RecoveryAction::Refresh,
+                false,
+            )
+        }
+    })?;
+    let status = response.status();
+    let body = response.bytes().await.map_err(|_| {
+        AppError::new(
+            ErrorCode::NETWORK_ERROR,
+            "Could not read the provider response",
+            RecoveryAction::Refresh,
+            false,
+        )
+    })?;
+    if !status.is_success() {
+        return Err(pr_http_error(status, coords.provider, &body));
+    }
+    let (url, reference) = pr_parse_response(coords.provider, &body)?;
+    Ok(PullRequestResult {
+        provider: coords.provider.name().to_string(),
+        url,
+        reference,
+    })
+}
+
+/// Host part of an HTTPS or SSH remote URL, lowercased.
+fn raw_url_host(remote_url: &str) -> Option<String> {
+    if let Some(after_at) = remote_url.split_once('@') {
+        let (host, _) = after_at.1.split_once(':')?;
+        if host.is_empty() {
+            return None;
+        }
+        return Some(host.to_ascii_lowercase());
+    }
+    let (_, rest) = remote_url.split_once("://")?;
+    let rest = rest
+        .rsplit_once('@')
+        .map(|(_, after)| after)
+        .unwrap_or(rest);
+    let authority = rest.split('/').next().unwrap_or("");
+    let host = authority.split(':').next().unwrap_or("");
+    if host.is_empty() {
+        return None;
+    }
+    Some(host.to_ascii_lowercase())
+}
+
+/// Create a pull (merge) request on the hosting provider. External write:
+/// requires a trusted repository and a matching session version.
+#[tauri::command]
+pub async fn pull_request_create(
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: PullRequestCreateRequest,
+) -> Result<ApiResult<PullRequestResult>, String> {
+    let request_id = request.request_id.clone();
+    let result = async {
+        check_request_id(&request_id)?;
+        let runner = git_runner()?;
+        let registry = registry.lock().await;
+        let session = registry
+            .get(&request.repo_id)
+            .ok_or_else(session_missing)?
+            .clone();
+        if session.trust != TrustState::Trusted {
+            return Err(trust_required("create a pull request"));
+        }
+        if session.version != request.expected_version {
+            return Err(stale_state());
+        }
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|_| {
+                AppError::new(
+                    ErrorCode::NETWORK_ERROR,
+                    "Could not start the provider request",
+                    RecoveryAction::Refresh,
+                    true,
+                )
+            })?;
+        core_pull_request_create(
+            &runner,
+            &registry,
+            &http,
+            None,
+            &request,
+            &session.worktree_root,
+        )
+        .await
+    }
+    .await;
+    Ok(match result {
+        Ok(data) => ApiResult::ok(data, request_id),
+        Err(error) => ApiResult::err(error, request_id),
+    })
+}
+
 pub mod prelude {
     pub use super::{
-        bitbucket_connect, epoch_to_iso8601, operation_log, remote_fetch, remote_pull, remote_push,
-        remote_status, BitbucketConnectRequest, FetchRequest, LogRequest, PullRequest, PushRequest,
-        RemoteContext,
+        bitbucket_connect, epoch_to_iso8601, operation_log, pull_request_create, remote_fetch,
+        remote_pull, remote_push, remote_status, BitbucketConnectRequest, FetchRequest, LogRequest,
+        PullRequest, PullRequestCreateRequest, PullRequestResult, PushRequest, RemoteContext,
     };
 }
 
@@ -1367,5 +1958,233 @@ mod tests {
         .await;
         assert_eq!(outcome, JobOutcome::Ok);
         assert_eq!(rx.recv().await, Some((42, "receiving objects".to_string())));
+    }
+
+    #[test]
+    fn pr_detects_github_bitbucket_and_gitlab_https_and_ssh() {
+        let github = detect_pr_provider("https://github.com/acme/widgets.git").expect("github");
+        assert_eq!(github.provider, PrProvider::GitHub);
+        assert_eq!(github.api_base, "https://api.github.com");
+        assert_eq!(github.namespace, "acme");
+        assert_eq!(github.repo, "widgets");
+
+        let ssh = detect_pr_provider("git@github.com:acme/widgets.git").expect("github ssh");
+        assert_eq!(ssh.provider, PrProvider::GitHub);
+
+        let bitbucket =
+            detect_pr_provider("https://bitbucket.org/acme/widgets").expect("bitbucket");
+        assert_eq!(bitbucket.provider, PrProvider::Bitbucket);
+
+        let gitlab = detect_pr_provider("https://gitlab.com/group/sub/widgets.git")
+            .expect("gitlab subgroup");
+        assert_eq!(gitlab.provider, PrProvider::GitLab);
+        assert_eq!(gitlab.namespace, "group/sub");
+        assert_eq!(gitlab.repo, "widgets");
+
+        assert!(detect_pr_provider("https://example.com/acme/widgets.git").is_none());
+        assert!(detect_pr_provider("git@github.com:lonely.git").is_none());
+        assert!(detect_pr_provider("https://github.com/acme/widgets.git\n").is_some());
+        assert!(detect_pr_provider("https://github.com/acme/widgets.git\u{7}").is_none());
+        assert_eq!(
+            pr_endpoint(&github),
+            "https://api.github.com/repos/acme/widgets/pulls"
+        );
+        assert_eq!(
+            pr_endpoint(&gitlab),
+            "https://gitlab.com/api/v4/projects/group%2Fsub%2Fwidgets/merge_requests"
+        );
+    }
+
+    #[test]
+    fn pr_payloads_match_each_provider_schema() {
+        let github = pr_request_json(PrProvider::GitHub, "T", "D", "feat", "main");
+        assert_eq!(github["head"], serde_json::json!("feat"));
+        assert_eq!(github["base"], serde_json::json!("main"));
+
+        let bitbucket = pr_request_json(PrProvider::Bitbucket, "T", "D", "feat", "main");
+        assert_eq!(
+            bitbucket.pointer("/source/branch/name"),
+            Some(&serde_json::json!("feat"))
+        );
+        assert_eq!(
+            bitbucket.pointer("/destination/branch/name"),
+            Some(&serde_json::json!("main"))
+        );
+
+        let gitlab = pr_request_json(PrProvider::GitLab, "T", "D", "feat", "main");
+        assert_eq!(gitlab["source_branch"], serde_json::json!("feat"));
+        assert_eq!(gitlab["target_branch"], serde_json::json!("main"));
+    }
+
+    #[test]
+    fn pr_parses_each_provider_response_and_rejects_junk() {
+        let (url, reference) = pr_parse_response(
+            PrProvider::GitHub,
+            br#"{"html_url":"https://github.com/acme/widgets/pull/7","number":7}"#,
+        )
+        .expect("github response");
+        assert_eq!(url, "https://github.com/acme/widgets/pull/7");
+        assert_eq!(reference, "#7");
+
+        let (url, reference) = pr_parse_response(
+            PrProvider::Bitbucket,
+            br#"{"id":9,"links":{"html":{"href":"https://bitbucket.org/acme/widgets/pull-requests/9"}}}"#,
+        )
+        .expect("bitbucket response");
+        assert_eq!(url, "https://bitbucket.org/acme/widgets/pull-requests/9");
+        assert_eq!(reference, "#9");
+
+        let (url, reference) = pr_parse_response(
+            PrProvider::GitLab,
+            br#"{"iid":3,"web_url":"https://gitlab.com/group/widgets/-/merge_requests/3"}"#,
+        )
+        .expect("gitlab response");
+        assert_eq!(url, "https://gitlab.com/group/widgets/-/merge_requests/3");
+        assert_eq!(reference, "!3");
+
+        assert!(pr_parse_response(PrProvider::GitHub, b"not json").is_err());
+        assert!(pr_parse_response(PrProvider::GitHub, br#"{"number":1}"#).is_err());
+        assert!(pr_parse_response(
+            PrProvider::GitHub,
+            br#"{"html_url":"http://evil.local/x","number":1}"#,
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn pr_credential_fill_reads_an_isolated_helper_entry() {
+        use std::process::Command as StdCommand;
+
+        let root = std::env::temp_dir().join(format!(
+            "gitdock-pr-credential-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("temp repository");
+        let helper_file = root.join("credentials");
+        let git = |args: &[&str]| {
+            let status = StdCommand::new("git")
+                .current_dir(&root)
+                .args(args)
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .status()
+                .expect("spawn git");
+            assert!(status.success(), "git {args:?} failed");
+        };
+        git(&["init"]);
+        git(&["config", "--local", "--add", "credential.helper", ""]);
+        let helper = format!("store --file={}", helper_file.display());
+        git(&["config", "--local", "--add", "credential.helper", &helper]);
+
+        let runner = git_runner().expect("Git runner");
+        let approved = runner
+            .run_with_stdin(
+                &root,
+                &["credential", "approve"],
+                b"protocol=https\nhost=github.com\nusername=octo\npassword=fixture-pat-123\n\n",
+                crate::git::WRITE_TIMEOUT,
+            )
+            .await
+            .expect("approve credential");
+        assert!(approved.success);
+
+        let (username, password) = pr_credential(&runner, &root, "github.com")
+            .await
+            .expect("fill credential");
+        assert_eq!(username, "octo");
+        assert_eq!(password, "fixture-pat-123");
+        assert!(pr_credential(&runner, &root, "unknown.example")
+            .await
+            .is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// End-to-end POST against a loopback stub: asserts method, path, auth
+    /// header and payload, then serves a canned provider response.
+    #[tokio::test]
+    async fn pr_create_posts_github_shape_to_a_stub_server() {
+        use std::io::{Read, Write};
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let seen_server = Arc::clone(&seen);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback stub listener");
+        let port = listener.local_addr().expect("stub port").port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("stub accept");
+            let mut buffer = vec![0u8; 8192];
+            let read = stream.read(&mut buffer).expect("stub read");
+            seen_server
+                .lock()
+                .expect("stub lock")
+                .extend_from_slice(&buffer[..read]);
+            let body = r#"{"html_url":"https://github.com/acme/widgets/pull/7","number":7}"#;
+            let response = format!(
+                "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).expect("stub write");
+        });
+
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("stub http client");
+        let coords = PrCoords {
+            provider: PrProvider::GitHub,
+            api_base: format!("http://127.0.0.1:{port}"),
+            namespace: "acme".to_string(),
+            repo: "widgets".to_string(),
+        };
+        let endpoint = pr_endpoint(&coords);
+        assert_eq!(
+            endpoint,
+            format!("http://127.0.0.1:{port}/repos/acme/widgets/pulls")
+        );
+        let response = http
+            .post(&endpoint)
+            .header("User-Agent", "Octopus/0.1")
+            .header("Accept", "application/json")
+            .bearer_auth("fixture-pat-123")
+            .json(&pr_request_json(
+                PrProvider::GitHub,
+                "T",
+                "D",
+                "feat",
+                "main",
+            ))
+            .send()
+            .await
+            .expect("stub post");
+        assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+        let body = response.bytes().await.expect("stub body");
+        let (url, reference) = pr_parse_response(PrProvider::GitHub, &body).expect("stub parse");
+        assert_eq!(url, "https://github.com/acme/widgets/pull/7");
+        assert_eq!(reference, "#7");
+        server.join().expect("stub server");
+        let raw = String::from_utf8(seen.lock().expect("stub lock").clone()).expect("stub text");
+        assert!(raw.starts_with("POST /repos/acme/widgets/pulls HTTP/1.1"));
+        assert!(raw.contains("authorization: Bearer fixture-pat-123"));
+        assert!(!raw.to_lowercase().contains("password"));
+        assert!(raw.contains(r#""head":"feat""#));
+    }
+
+    #[test]
+    fn pull_request_create_request_accepts_frontend_camel_case() {
+        let request: PullRequestCreateRequest = serde_json::from_value(serde_json::json!({
+            "requestId": "req-1",
+            "repoId": "repo-1",
+            "expectedVersion": 3,
+            "remote": null,
+            "sourceBranch": "feat/ui",
+            "targetBranch": "main",
+            "title": "T",
+            "description": "D"
+        }))
+        .expect("frontend camelCase payload deserializes");
+        assert_eq!(request.source_branch, "feat/ui");
+        assert_eq!(request.target_branch, "main");
+        assert_eq!(request.remote, None);
     }
 }

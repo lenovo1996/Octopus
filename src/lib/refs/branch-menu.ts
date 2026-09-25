@@ -22,6 +22,7 @@ export type BranchMenuAction =
   | "upstream"
   | "push"
   | "push-to"
+  | "create-pr"
   | "reveal"
   | "delete";
 
@@ -47,6 +48,20 @@ function copyItems(
       action: () => onCopy(ref.oid)
     }
   ];
+}
+
+/**
+ * Provider-side branch name used as the pull-request target. Remote full
+ * names carry the remote prefix (`refs/remotes/origin/foo` → `foo`); local
+ * labels pass through unchanged.
+ */
+export function pullRequestTargetName(ref: RefItem): string {
+  if (ref.kind !== "remote") return ref.label;
+  const withoutPrefix = ref.fullName.startsWith("refs/remotes/")
+    ? ref.fullName.slice("refs/remotes/".length)
+    : ref.label;
+  const slash = withoutPrefix.indexOf("/");
+  return slash >= 0 ? withoutPrefix.slice(slash + 1) : withoutPrefix;
 }
 
 export function buildBranchMenuItems(
@@ -185,6 +200,13 @@ export function buildBranchMenuItems(
     separatorBefore: !local,
     disabled: locked,
     action: go("push-to")
+  });
+  items.push({
+    id: "create-pr",
+    label: `Create pull request to ${ref.label}…`,
+    separatorBefore: local,
+    disabled: locked || ref.current,
+    action: go("create-pr")
   });
   items.push(...copyItems(ref, onCopy));
   items.push({

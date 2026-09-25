@@ -1,7 +1,7 @@
 {
-  "name": "gitdock",
+  "name": "octopus",
   "version": "0.1.0",
-  "description": "GitDock — Git GUI desktop (Rust + Tauri 2 + Svelte 5 + TypeScript), Linux first",
+  "description": "Octopus — Git GUI desktop (Rust + Tauri 2 + Svelte 5 + TypeScript), Linux first",
   "type": "module",
   "packageManager": "pnpm@10.34.5",
   "scripts": {
@@ -11,9 +11,6 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
     "test:unit": "vitest run",
-    "test:ui": "node scripts/not-implemented.mjs test:ui T02",
-    "test:visual": "node scripts/not-implemented.mjs test:visual T02",
-    "test:native": "node scripts/not-implemented.mjs test:native T15",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -34,7 +34,7 @@
 
 <main class="gd-welcome">
   <div class="gd-welcome-card">
-    <h1>GitDock</h1>
+    <h1><img src="/brand/octopus-128.png" alt="" width="40" height="40" />Octopus</h1>
     {#if demo}
       <p class="gd-demo-note">Browser preview — static demo data, not native Git.</p>
     {/if}
@@ -125,6 +125,9 @@
     border-radius: var(--gd-radius-panel);
   }
   .gd-welcome-card h1 {
+    display: flex;
+    align-items: center;
+    gap: var(--gd-space-2);
     margin: 0 0 var(--gd-space-1);
     font-size: var(--gd-font-size-title);
   }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "GitDock",
+  "productName": "Octopus",
   "version": "0.1.0",
   "identifier": "com.gitdock.app",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "GitDock",
+        "title": "Octopus",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,

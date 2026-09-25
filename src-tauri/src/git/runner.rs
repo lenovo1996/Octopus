@@ -1,4 +1,4 @@
-//! Bounded system-Git subprocess runner (docs/05-git-engine.md §1).
+//! Bounded system-Git subprocess runner.
 //!
 //! Fixed executable + argv list, never a shell. Repository-redirecting env
 //! vars are stripped; interactive prompts and pagers are disabled.

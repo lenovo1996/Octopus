@@ -154,7 +154,7 @@ async fn core_diff(
                     true,
                 )
             })?;
-            // Contract (docs/04-ipc-contracts.md): parent index defaults
+            // IPC contract: parent index defaults
             // to 0 for every non-root commit, merges included.
             let used_parent: Option<usize> = match (*parent_index, meta.parents.len()) {
                 (None, 0) => None,

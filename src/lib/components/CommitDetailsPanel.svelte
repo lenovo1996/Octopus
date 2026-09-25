@@ -4,7 +4,7 @@
   import FileChangeRow from "./FileChangeRow.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import { pointFromContextEvent, type ContextMenuItem } from "../context-menu/model";
-  let { details, loading, error, refs, selectedTarget, onOpen, onParentChange, onParentCommit, onRetry, onBack }: {
+  let { details, loading, error, refs, selectedTarget, onOpen, onParentChange, onParentCommit, onRetry }: {
     details: CommitDetails | null; loading: boolean; error: AppError | null; refs: RefItem[]; selectedTarget: DiffTarget | null;
     onOpen: (id: string) => void; onParentChange: (index: number | null) => void; onParentCommit: (oid: string) => void; onRetry: () => void; onBack: () => void;
   } = $props();

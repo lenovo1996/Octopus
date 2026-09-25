@@ -1,4 +1,4 @@
-//! Repository discovery (docs/05-git-engine.md §3).
+//! Repository discovery.
 //!
 //! Canonicalizes the selected path, then resolves worktree root, git dir and
 //! common dir with `rev-parse`. Supports linked worktrees (`.git` is a file)

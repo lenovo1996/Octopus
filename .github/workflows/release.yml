@@ -1,0 +1,90 @@
+name: Release Octopus
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Each run has its own version. Do not cancel queued merges on main.
+jobs:
+  checks:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Linux build and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libxdo-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils \
+            file libfuse2t64
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Set release version in the build checkout
+        id: version
+        run: |
+          version="$(python3 scripts/prepare-release.py "$GITHUB_RUN_NUMBER")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build Linux packages
+        run: pnpm tauri build --ci --bundles deb,rpm,appimage -- --locked
+      - name: Collect packages and checksums
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p release-assets
+          cp "src-tauri/target/release/bundle/deb/Octopus_${RELEASE_VERSION}_amd64.deb" release-assets/
+          cp "src-tauri/target/release/bundle/rpm/Octopus-${RELEASE_VERSION}-1.x86_64.rpm" release-assets/
+          cp "src-tauri/target/release/bundle/appimage/Octopus_${RELEASE_VERSION}_amd64.AppImage" release-assets/
+          cd release-assets
+          sha256sum -- *.deb *.rpm *.AppImage > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: octopus-linux-${{ github.run_id }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: octopus-linux-${{ github.run_id }}
+          path: release-assets
+      - name: Publish official GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: bash scripts/publish-release.sh

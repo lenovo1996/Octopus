@@ -1,4 +1,4 @@
-//! Worktree status via `status --porcelain=v2 -z` (docs/05-git-engine.md §3).
+//! Worktree status via `status --porcelain=v2 -z`.
 //!
 //! Byte-level parsing: records are NUL-terminated and paths are raw bytes,
 //! never split on newlines or spaces, never lossy-decoded for identity.
@@ -331,7 +331,7 @@ pub fn to_display_rows(
 }
 
 /// Run status in `cwd` and parse it. `GIT_OPTIONAL_LOCKS=0` avoids optional
-/// index refresh writes on this read-only path (docs/05-git-engine.md §9).
+/// index refresh writes on this read-only path.
 pub async fn read_status(runner: &GitRunner, cwd: &Path) -> Result<ParsedStatus, StatusError> {
     let output = runner
         .run_with_env(

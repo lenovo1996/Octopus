@@ -1,4 +1,4 @@
-//! History and ref readers (docs/05-git-engine.md §3).
+//! History and ref readers.
 //!
 //! Topology comes from `rev-list --topo-order --parents` on pinned tips;
 //! metadata from a length-framed `cat-file --batch` parse (never a separator
@@ -469,7 +469,7 @@ pub async fn read_commit_files(
             owned.push(oid.to_string());
             None
         }
-        // Contract (docs/04-ipc-contracts.md): parent index defaults to 0
+        // IPC contract: parent index defaults to 0
         // for every non-root commit, merges included; null is only valid
         // for the root. The UI offers the parent dropdown after this
         // first load, so refusing here would strand merge details.
