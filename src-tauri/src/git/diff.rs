@@ -84,6 +84,77 @@ pub fn select_patch_hunk(patch: &[u8], hunk_id: &str) -> Result<Vec<u8>, DiffErr
     Ok(result)
 }
 
+/// Rebuild a one-hunk patch keeping only the chosen changed lines.
+/// `lines` holds 0-based ordinals among the hunk's `+`/`-` body rows
+/// (context and `\` marker rows are never counted); the frontend mirrors
+/// this rule by counting `add`/`delete` rows in the rendered hunk.
+/// Dropped `-` rows become context rows and dropped `+` rows are omitted,
+/// so the sub-patch still anchors on real file bytes; `git apply
+/// --recount` repairs the counts. This matches a hand-edited `git add -p`
+/// hunk: staging an addition without its deletion lands it right after
+/// the anchored line instead of failing on context mismatch. Hunks with
+/// a `\ No newline` marker are refused: dropping lines around the marker
+/// could silently flip the file's trailing newline, so those hunks stay
+/// hunk-level only (fail closed, never guessed).
+pub fn select_patch_lines(
+    patch: &[u8],
+    hunk_id: &str,
+    lines: &[u32],
+) -> Result<Vec<u8>, DiffError> {
+    if lines.is_empty() {
+        return Err(DiffError::Invalid(
+            "Select at least one changed line".to_string(),
+        ));
+    }
+    let (prelude, ranges) = patch_hunk_ranges(patch)
+        .ok_or_else(|| DiffError::Invalid("This file has no selectable text hunks".to_string()))?;
+    let selected = ranges
+        .into_iter()
+        .find(|range| patch_fingerprint(&patch[range.clone()]) == hunk_id)
+        .ok_or_else(|| DiffError::Invalid("The diff changed; refresh it and retry".to_string()))?;
+    let body = &patch[selected.clone()];
+    let mut rows = body.split_inclusive(|byte| *byte == b'\n');
+    let header = rows
+        .next()
+        .filter(|row| row.starts_with(b"@@ -"))
+        .ok_or_else(|| DiffError::Invalid("The diff changed; refresh it and retry".to_string()))?;
+    let mut changed_total: u32 = 0;
+    let mut kept: Vec<Vec<u8>> = Vec::new();
+    for row in rows {
+        if row.starts_with(b"\\") {
+            return Err(DiffError::Invalid(
+                "Line actions need the whole hunk when the file has no trailing newline"
+                    .to_string(),
+            ));
+        }
+        if row.first() == Some(&b'+') || row.first() == Some(&b'-') {
+            if lines.contains(&changed_total) {
+                kept.push(row.to_vec());
+            } else if row.first() == Some(&b'-') {
+                let mut context = Vec::with_capacity(row.len());
+                context.push(b' ');
+                context.extend_from_slice(&row[1..]);
+                kept.push(context);
+            }
+            changed_total += 1;
+        } else {
+            kept.push(row.to_vec());
+        }
+    }
+    if lines.iter().any(|line| *line >= changed_total) {
+        return Err(DiffError::Invalid(
+            "The diff changed; refresh it and retry".to_string(),
+        ));
+    }
+    let mut result = Vec::with_capacity(prelude.len() + body.len());
+    result.extend_from_slice(&patch[prelude]);
+    result.extend_from_slice(header);
+    for row in &kept {
+        result.extend_from_slice(row);
+    }
+    Ok(result)
+}
+
 impl From<RunError> for DiffError {
     fn from(value: RunError) -> Self {
         DiffError::Run(value)
@@ -529,6 +600,41 @@ pub async fn read_index_diff(
     }
 }
 
+/// Raw staged (`--cached`) patch for one raw path, for index mutations.
+/// Untracked paths and submodule pointers have no staged patch.
+pub async fn read_index_patch(
+    runner: &GitRunner,
+    worktree_root: &Path,
+    raw_path: &[u8],
+) -> Result<Vec<u8>, DiffError> {
+    match staged_mode(runner, worktree_root, raw_path).await? {
+        Some(mode) if mode == "160000" => Err(DiffError::Invalid(
+            "Submodule hunks cannot be staged or discarded".to_string(),
+        )),
+        Some(_) => {
+            run_patch(
+                runner,
+                worktree_root,
+                &[
+                    "diff",
+                    "--cached",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "--no-color",
+                    "--patch",
+                    "-U3",
+                    "-M",
+                ],
+                raw_path,
+            )
+            .await
+        }
+        None => Err(DiffError::Invalid(
+            "File is not in the index; preview it from working changes instead.".to_string(),
+        )),
+    }
+}
+
 /// Commit diff of one raw path against its parent (or the empty tree).
 /// `parent` is the exact parent OID, or `None` for the root commit. Root
 /// comparisons use `diff-tree --root`: the empty-tree object is not
@@ -664,6 +770,53 @@ mod tests {
         assert!(truncated);
         assert_eq!(adds, 4);
         assert_eq!(hunks[0].lines.len(), 4);
+    }
+
+    const LINE_PATCH: &[u8] = b"diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,4 +1,5 @@\n keep\n-old\n+new\n+extra\n tail\n";
+
+    fn line_hunk_id() -> String {
+        let (prelude, ranges) = patch_hunk_ranges(LINE_PATCH).expect("one hunk");
+        let _ = prelude;
+        patch_fingerprint(&LINE_PATCH[ranges[0].clone()])
+    }
+
+    #[test]
+    fn select_patch_lines_keeps_only_chosen_changes() {
+        let id = line_hunk_id();
+        let sub = select_patch_lines(LINE_PATCH, &id, &[0]).expect("first changed line");
+        let text = String::from_utf8(sub).expect("ascii patch");
+        assert!(text.contains("-old\n"));
+        assert!(!text.contains("+new\n"));
+        assert!(!text.contains("+extra\n"));
+        assert!(text.contains(" keep\n") && text.contains(" tail\n"));
+        let sub = select_patch_lines(LINE_PATCH, &id, &[1, 2]).expect("added lines");
+        let text = String::from_utf8(sub).expect("ascii patch");
+        assert!(!text.contains("-old\n"));
+        assert!(
+            text.contains(" old\n"),
+            "dropped deletion anchors as context"
+        );
+        assert!(text.contains("+new\n") && text.contains("+extra\n"));
+    }
+
+    #[test]
+    fn select_patch_lines_rejects_bad_selection() {
+        let id = line_hunk_id();
+        assert!(select_patch_lines(LINE_PATCH, &id, &[]).is_err());
+        assert!(select_patch_lines(LINE_PATCH, &id, &[3]).is_err());
+        assert!(select_patch_lines(LINE_PATCH, &id, &[0, 99]).is_err());
+        assert!(
+            select_patch_lines(LINE_PATCH, "h1:deadbeefdeadbeefdeadbeefdeadbeef", &[0]).is_err()
+        );
+    }
+
+    #[test]
+    fn select_patch_lines_refuses_no_newline_hunks() {
+        let patch = b"diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n keep\n+new\n\\ No newline at end of file\n";
+        let (prelude, ranges) = patch_hunk_ranges(patch).expect("one hunk");
+        let _ = prelude;
+        let id = patch_fingerprint(&patch[ranges[0].clone()]);
+        assert!(select_patch_lines(patch, &id, &[0]).is_err());
     }
 
     #[test]

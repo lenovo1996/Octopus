@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildBranchMenuItems, pullRequestTargetName } from "../../src/lib/refs/branch-menu";
+import { buildBranchMenuItems, pullRequestTargetName, resolveCheckoutTarget } from "../../src/lib/refs/branch-menu";
 import type { RefItem } from "../../src/lib/ipc/types";
 
 function ref(overrides: Partial<RefItem> = {}): RefItem {
@@ -67,6 +67,14 @@ describe("branch context menu", () => {
     expect(items.find((item) => item.id === "create-pr")?.disabled).toBe(true);
     const other = buildBranchMenuItems(ref(), ctx, vi.fn(), vi.fn());
     expect(other.find((item) => item.id === "create-pr")?.disabled).toBe(false);
+  });
+
+  it("checks out the local twin instead of opening the branches dialog", () => {
+    const local = ref();
+    const remote = ref({ kind: "remote", refId: "refs/remotes/origin/feature", fullName: "refs/remotes/origin/feature", label: "origin/feature" });
+    expect(resolveCheckoutTarget([local, remote], local)).toEqual({ refId: local.refId, trackAs: null });
+    expect(resolveCheckoutTarget([local, remote], remote)).toEqual({ refId: local.refId, trackAs: null });
+    expect(resolveCheckoutTarget([remote], remote)).toEqual({ refId: remote.refId, trackAs: "feature" });
   });
 
   it("derives the provider target name without the remote prefix", () => {

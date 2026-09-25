@@ -1,12 +1,61 @@
 # Octopus
 
-Git GUI desktop cho Linux, dùng Rust + Tauri 2 + Svelte 5 + TypeScript. Mở nhiều repository, xem commit graph/diff, stage và commit, quản lý branch/stash, merge và đồng bộ remote.
+A Git desktop client built with **Rust, Tauri 2, Svelte 5, and TypeScript**, with Linux as the primary platform. Browse history, review changes, create commits, and work across multiple repositories in one window.
 
-## Chạy từ source
+[Releases](https://github.com/lenovo1996/Octopus/releases) · [Run from source](#run-from-source) · [Build and test](#build-and-test)
 
-Cần system Git ≥ 2.43, Node theo [.nvmrc](.nvmrc), pnpm theo `packageManager` trong [package.json](package.json), Rust theo [rust-toolchain.toml](rust-toolchain.toml).
+## Features
 
-Trên Ubuntu 24.04, cài dependencies native:
+The screenshots below show the current interface with built-in browser demo data.
+
+### Multiple repositories and commit history
+
+Open repositories in separate tabs, keep a draft for each workspace, and search commit history. The graph shows branches and merge relationships; selecting a commit opens its metadata, changed files, and parent comparison.
+
+![Two repository tabs with a branch graph and merge commit details](docs/images/commit-history.png)
+
+### Review, stage, and commit changes
+
+Inspect staged and unstaged files in a unified diff with syntax highlighting. Stage individual files or supported text hunks, review additions and deletions, then write a commit summary and optional description. Discard actions ask for confirmation.
+
+![Working changes with a unified diff, hunk actions, staged files, and commit composer](docs/images/working-changes.png)
+
+### Branch and history actions
+
+Search local and remote branches, create branches and tags, and manage upstreams. Context menus provide checkout, merge, rebase, cherry-pick, and revert actions. Fetch, pull, and push are available in the toolbar; the merge workflow also includes conflict inspection and resolution.
+
+![Branch context menu with checkout, merge, rebase, tag, upstream, and push actions](docs/images/branch-actions.png)
+
+### Stash and restore work
+
+Save working changes with an optional message and choose whether to include untracked files. Apply a stash while keeping its entry, or pop it after a successful restore. Switching branches with a dirty worktree can stash changes first.
+
+![Stash dialog with save options and Apply and Pop actions for existing entries](docs/images/stash.png)
+
+### Create pull requests
+
+Create pull requests for GitHub and Bitbucket Cloud, or merge requests for GitLab, using the configured remote and saved Git credentials. Right-click a target branch, choose **Create pull request to…**, and enter a title and description. The current branch is the source; the target remains editable.
+
+![Pull request dialog with source branch, title, description, and target branch](docs/images/pull-request.png)
+
+## Install
+
+Linux packages are published on the [Releases page](https://github.com/lenovo1996/Octopus/releases):
+
+| Package | Use |
+|---|---|
+| `.deb` | Debian and Ubuntu |
+| `.rpm` | RPM-based distributions |
+| `.AppImage` | Portable bundle; make the downloaded file executable before running it |
+| `SHA256SUMS` | Download checksums |
+
+The build baseline is **Ubuntu 24.04 x86_64**. A system installation of **Git 2.43 or newer** is required. Windows and macOS packages are not included in the current release workflow.
+
+## Run from source
+
+Use the Node version in [.nvmrc](.nvmrc), the pnpm version in [package.json](package.json), and the Rust toolchain in [rust-toolchain.toml](rust-toolchain.toml).
+
+Install the native build dependencies on Ubuntu 24.04:
 
 ```sh
 sudo apt-get update
@@ -19,9 +68,11 @@ pnpm install --frozen-lockfile
 pnpm tauri dev
 ```
 
-`pnpm dev` mở browser demo bằng dữ liệu giả. Các thao tác Git thật chạy trong desktop app.
+For a browser preview, run `pnpm dev`. It uses demo data; real Git operations run in the desktop app started with `pnpm tauri dev`.
 
-## Kiểm tra và build
+## Build and test
+
+Run the frontend, release-tooling, and Rust checks:
 
 ```sh
 pnpm check
@@ -33,33 +84,39 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D w
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 ```
 
+Build the frontend or a Linux desktop package:
+
 ```sh
 pnpm build
 pnpm tauri build --bundles deb -- --locked
 ```
 
-Frontend output nằm trong `dist/`; executable và packages nằm trong `src-tauri/target/release/`. Browser fixtures ở `tests/ui/`; chưa có runner UI/visual/native E2E tự động.
+Frontend output is written to `dist/`. The desktop executable and packages are written to `src-tauri/target/release/`.
 
-## Cấu trúc
+Browser fixtures are available in `tests/ui/`. Automated UI/visual/native E2E runners are not yet included, and full native workflow acceptance remains in progress. See the [verification status](docs/development.md#verification-status) for completed checks and remaining coverage.
 
-| Đường dẫn | Nội dung |
+## Project structure
+
+| Path | Contents |
 |---|---|
-| `src/app/`, `src/lib/` | Svelte UI, state, typed IPC và styles |
-| `src/mocks/`, `tests/` | Browser demo, unit tests, UI fixtures và release tests |
-| `src-tauri/` | Rust Git engine, commands, persistence, Tauri config và native icons |
-| `public/` | Icon gốc, icon UI và favicon |
-| `.github/workflows/`, `scripts/`, `docs/` | CI/release, scripts và hướng dẫn bảo trì |
+| `src/app/`, `src/lib/` | Svelte UI, state, typed IPC, and styles |
+| `src/mocks/`, `tests/` | Browser demo, unit tests, UI fixtures, and release tests |
+| `src-tauri/` | Rust Git engine, commands, persistence, and Tauri configuration |
+| `public/` | Static application assets |
+| `.github/workflows/`, `scripts/`, `docs/` | CI/release automation, maintenance guides, and screenshots |
 
-## Release
+## Releases
 
-Merge/push vào `main` chạy checks, build Linux `.deb`, `.rpm`, `.AppImage`, rồi tạo **GitHub Release chính thức** kèm `SHA256SUMS`. Version là `MAJOR.MINOR.GITHUB_RUN_NUMBER`; workflow chỉ stamp version trong checkout CI.
+Each merge or push to `main` runs checks, builds Linux `.deb`, `.rpm`, and `.AppImage` packages, then publishes an **official GitHub Release** with `SHA256SUMS`. A failed check or build blocks publication.
 
-Xem [release workflow](.github/workflows/release.yml), [hướng dẫn release](docs/release.md) và [trạng thái kiểm chứng](docs/development.md#trạng-thái-kiểm-chứng).
+Release versions follow `MAJOR.MINOR.GITHUB_RUN_NUMBER`; version changes are applied only inside the CI checkout. The workflow uses the built-in `GITHUB_TOKEN`. Manual releases can be started from **Actions → Release Octopus → Run workflow → main**.
 
-## Branding và dữ liệu cũ
+See the [release workflow](.github/workflows/release.yml) and [release guide](docs/release.md).
 
-Tên app/executable là **Octopus** / `octopus`. [Icon bạch tuộc gốc](public/brand/octopus.png) được dùng để tạo native icons, icon UI và favicon; xem [cách tái tạo](docs/development.md#icon).
+## Contributing
 
-Giữ `com.gitdock.app`, `gitdock-settings.json`, storage keys `gitdock.*` và IPC events `gitdock://*` để tương thích dữ liệu GitDock đã lưu. Các tên nội bộ này không phải lỗi đổi tên.
+Read [AGENTS.md](AGENTS.md) and the [development guide](docs/development.md) before changing the application. All maintenance guides are written in English. Use temporary repositories for tests that modify Git state.
 
-Hướng dẫn đóng góp: [AGENTS.md](AGENTS.md) và [development.md](docs/development.md). License: [MIT](LICENSE-MIT).
+## License
+
+[MIT](LICENSE-MIT).

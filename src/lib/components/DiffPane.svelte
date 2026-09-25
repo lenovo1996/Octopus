@@ -1,9 +1,11 @@
 <script lang="ts">
   import type { DiffState } from "../diff/controller";
   import { highlightDiffLine } from "../diff/highlight";
+  import { changedLineOrdinal, hunkAllowsLineActions } from "../diff/lines";
 
   let { state, onClose, onRetry, canMutateHunks = false, hunkMutationHint = null, mutationBusy = false,
-    mutationError = null, onStageHunk = () => {}, onDiscardHunk = () => {} }: {
+    mutationError = null, onStageHunk = () => {}, onDiscardHunk = () => {}, lineMode = null,
+    linesMutable = false, onStageLines = () => {}, onUnstageLines = () => {} }: {
     state: DiffState;
     onClose: () => void;
     onRetry: () => void;
@@ -13,9 +15,20 @@
     mutationError?: string | null;
     onStageHunk?: (hunkId: string) => void;
     onDiscardHunk?: (hunkId: string) => void;
+    /** "stage" for unstaged diffs, "unstage" for staged diffs, null hides line buttons. */
+    lineMode?: "stage" | "unstage" | null;
+    linesMutable?: boolean;
+    onStageLines?: (hunkId: string, lines: number[]) => void;
+    onUnstageLines?: (hunkId: string, lines: number[]) => void;
   } = $props();
 
   const showHunkActions = $derived(state.selection?.target.kind === "worktree");
+
+  function lineTitle(hunkAllows: boolean): string {
+    if (!hunkAllows) return "Line actions need the whole hunk when the file has no trailing newline";
+    if (!linesMutable || mutationBusy) return "Line actions are unavailable right now";
+    return lineMode === "unstage" ? "Unstage this line" : "Stage this line";
+  }
 
   const source = $derived.by(() => {
     const target = state.selection?.target;
@@ -49,6 +62,7 @@
       {#if doc.kind === "text"}
         <p class="gd-summary"><span class="gd-added">+{doc.additions ?? 0}</span> <span class="gd-deleted">−{doc.deletions ?? 0}</span> · {doc.hunks.length} {doc.hunks.length === 1 ? "hunk" : "hunks"} · Unified diff</p>
         {#if showHunkActions && hunkMutationHint}<p class="gd-partial-note">{hunkMutationHint}</p>{/if}
+        {#if lineMode === "unstage" && !linesMutable && doc.kind === "text" && doc.truncated}<p class="gd-partial-note">Line actions are unavailable while this diff is truncated.</p>{/if}
         {#if doc.hunks.length === 0}
           <p class="gd-message">No content changes.</p>
         {/if}
@@ -68,6 +82,8 @@
               {/if}
             </div>
             {#each hunk.lines as line, i (i)}
+              {@const ordinal = lineMode === null ? null : changedLineOrdinal(hunk, i)}
+              {@const hunkAllows = hunkAllowsLineActions(hunk)}
               <div class="gd-line" class:gd-add={line.kind === "add"} class:gd-delete={line.kind === "delete"}>
                 <span class="gd-lineno">{line.oldLine ?? ""}</span>
                 <span class="gd-lineno">{line.newLine ?? ""}</span>
@@ -77,6 +93,19 @@
                 {:else}
                   <!-- highlightDiffLine escapes first, so {@html} cannot inject markup -->
                   <code>{@html highlightDiffLine(line.text, state.selection?.path ?? "")}</code>
+                {/if}
+                {#if ordinal !== null}
+                  <button
+                    type="button"
+                    class="gd-line-action"
+                    disabled={!linesMutable || mutationBusy || !hunkAllows}
+                    title={lineTitle(hunkAllows)}
+                    aria-label={lineMode === "unstage" ? `Unstage line ${ordinal + 1}` : `Stage line ${ordinal + 1}`}
+                    onclick={() => {
+                      if (lineMode === "unstage") onUnstageLines(hunk.hunkId, [ordinal]);
+                      else onStageLines(hunk.hunkId, [ordinal]);
+                    }}
+                  >{lineMode === "unstage" ? "−" : "+"}</button>
                 {/if}
               </div>
             {/each}
@@ -119,6 +148,10 @@
   .gd-stage-hunk:not(:disabled):hover { color: var(--gd-accent); border-color: var(--gd-accent); }
   .gd-discard-hunk:not(:disabled):hover { color: var(--gd-danger); border-color: var(--gd-danger); }
   .gd-line { display: flex; min-height: 24px; padding-right: 16px; }
+  .gd-line-action { flex: 0 0 auto; align-self: center; margin-left: auto; height: 20px; min-width: 22px; padding: 0 5px; font-size: 11px; line-height: 1; opacity: 0; }
+  .gd-line:hover .gd-line-action, .gd-line:focus-within .gd-line-action { opacity: 1; }
+  .gd-line-action:disabled { cursor: not-allowed; }
+  .gd-line-action:not(:disabled):hover { color: var(--gd-accent); border-color: var(--gd-accent); }
   .gd-add { background: var(--gd-diff-add-bg); }
   .gd-delete { background: var(--gd-diff-delete-bg); }
   .gd-lineno { flex: 0 0 5ch; text-align: right; padding-right: 1ch; color: var(--gd-text-secondary); user-select: none; font-variant-numeric: tabular-nums; }

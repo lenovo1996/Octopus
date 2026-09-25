@@ -1,42 +1,42 @@
-# Hướng dẫn cho AI triển khai Octopus
+# Instructions for AI agents working on Octopus
 
 ## CodeGraph
 
-Trong repository có `.codegraph/` tại root, dùng CodeGraph trước khi grep/find hoặc đọc code để tìm hiểu hay định vị implementation. Dùng MCP `codegraph_explore` nếu có, hoặc `codegraph explore "<symbol names or question>"`. Nếu không có `.codegraph/`, bỏ qua; không tự index.
+If a `.codegraph/` directory exists at the repository root, use CodeGraph before grep/find or reading source files to understand or locate an implementation. Use the `codegraph_explore` MCP tool when available, or `codegraph explore "<symbol names or question>"`. If `.codegraph/` does not exist, skip CodeGraph and do not create an index.
 
-## Đọc trước khi sửa
+## Read before editing
 
-1. Đọc `README.md` và `docs/development.md`; với build/release, đọc thêm `docs/release.md`.
-2. Với UI, xem màn hình đang chạy và `src/lib/styles/`; dùng icon trong `public/` và `src-tauri/icons/`.
-3. Với backend, đọc typed contracts ở `src/lib/ipc/types.ts`, Rust DTOs/commands và Git engine liên quan; giữ các ràng buộc Git/dữ liệu trong `docs/development.md`.
-4. Xác nhận dependency của task đã hoàn thành; chỉ sửa phần cần thiết cho task hiện tại.
+1. Read `README.md` and `docs/development.md`; also read `docs/release.md` for build or release work.
+2. For UI work, inspect the running interface and `src/lib/styles/`; use the icons in `public/` and `src-tauri/icons/`.
+3. For backend work, read the typed contracts in `src/lib/ipc/types.ts`, the relevant Rust DTOs/commands, and the Git engine. Preserve the Git and data constraints in `docs/development.md`.
+4. Confirm that task dependencies are complete, and edit only what the current task requires.
 
-## Ràng buộc implementation
+## Implementation constraints
 
-- Rust + Tauri 2 + Svelte 5 + TypeScript strict + Vite; Linux trước. Không tự đổi stack, thêm server, tài khoản cloud hoặc AI runtime vào sản phẩm.
-- Svelte 5 runes cho state mới. UI không gọi shell, không giữ credentials, không tự coi state cache là Git truth.
-- Mọi thao tác Git qua typed command và Rust Git engine. Không tạo API `run_command(string)` hoặc nhận argv tùy ý từ frontend.
-- Không tự mở rộng phạm vi feature. Không biến mục chưa hỗ trợ thành nút bấm giả.
-- Dùng repo tạm cho test mutation. Không dùng repository thật của người dùng làm test fixture.
-- Không chạy `reset --hard`, `clean`, force push, xóa file/repo hoặc thay đổi lịch sử người dùng khi chưa có xác nhận cụ thể. Không tự commit/push/publish thay người dùng.
-- Không chạy generator ghi đè project hiện có để khắc phục lỗi scaffold.
-- Không tự spawn subagent. Chỉ chia việc cho agent khi người dùng yêu cầu; mặc định một agent thực hiện task tuần tự.
+- Use Rust, Tauri 2, Svelte 5, strict TypeScript, and Vite, with Linux first. Do not change the stack or add a server, cloud account, or AI runtime to the product without an explicit request.
+- Use Svelte 5 runes for new state. The UI must not invoke a shell, retain credentials, or treat cached state as Git truth.
+- Route every Git operation through a typed command and the Rust Git engine. Do not create a `run_command(string)` API or accept arbitrary argv from the frontend.
+- Do not expand feature scope without a request. Do not turn unsupported functionality into fake buttons.
+- Use temporary repositories for mutation tests. Never use a user's real repository as a test fixture.
+- Do not run `reset --hard`, `clean`, force-push, delete files/repositories, or rewrite user history without specific confirmation. Do not commit, push, or publish on the user's behalf.
+- Do not run a generator that overwrites the existing project to fix a scaffold problem.
+- Do not spawn subagents automatically. Delegate only when the user asks; otherwise, one agent performs the task sequentially.
 
-## Definition of done mỗi task
+## Definition of done for each task
 
-Code đúng acceptance criteria; checks liên quan pass; UI có loading/empty/error nếu áp dụng; không có secret trong logs; cập nhật trạng thái/checks/blocker trong `docs/development.md`. Không tạo thêm evidence/handoff theo từng task. Nếu môi trường không chạy được check, ghi `blocked` cho gate đó và chỉ rõ nguyên nhân. Không tuyên bố đã kiểm chứng thay cho việc chạy thật.
+The code meets its acceptance criteria; relevant checks pass; the UI includes loading, empty, and error states where applicable; logs contain no secrets; and the current status, checks, and blockers are recorded in `docs/development.md`. Do not create separate evidence or handoff directories for each task. If the environment cannot run a check, mark that gate as `blocked` and state the exact reason. Never claim verification in place of actually running a check.
 
 ## Output style
 
-Người đọc có ADHD. Viết tiếng Việt, giữ identifiers kỹ thuật bằng tiếng Anh.
+The reader has ADHD. Write project documentation in English, respond to the user in their language unless requested otherwise, and keep technical identifiers in English.
 
-1. Dẫn bằng kết quả hoặc hành động tiếp theo: command, path hoặc snippet trước.
-2. Đánh số công việc nhiều bước; mỗi bước là một hành động giới hạn.
-3. Kết thúc bằng một hành động làm được trong dưới 2 phút.
-4. Xử lý xong vấn đề hiện tại trước khi nêu vấn đề mới.
-5. Nêu tiến độ mỗi lượt, ví dụ “bước 3/5 hoàn tất”.
-6. Ước lượng thời gian bằng phút/giờ/ngày cụ thể; ghi rõ đó là ước lượng.
-7. Sau thay đổi, chỉ ra điều gì chạy được và bằng chứng.
-8. Với lỗi, ghi vị trí, nguyên nhân và cách sửa.
-9. Nhóm và xếp ưu tiên danh sách dài, tối đa khoảng 5 mục mỗi nhóm.
-10. Không preamble, recap hay lời kết chung chung. Giải thích đầy đủ khi được yêu cầu. Xác nhận trước hành động phá hủy. Sau ba lần sửa thất bại cùng lỗi, dừng và nêu giả định đang đáng nghi. Nếu yêu cầu mơ hồ, hỏi một câu ngắn.
+1. Lead with the result or next action: command, path, or snippet first.
+2. Number multi-step work, with one bounded action per step.
+3. End with one action that can be completed in under two minutes.
+4. Finish the current issue before raising a new one.
+5. State progress on every turn, for example, “step 3/5 complete.”
+6. Give estimates in concrete minutes, hours, or days, and label them as estimates.
+7. After a change, state what now works and provide evidence.
+8. For errors, give the location, cause, and fix.
+9. Group and rank long lists, aiming for no more than five items per group.
+10. Avoid preambles, recaps, and generic closing remarks. Explain fully when asked. Confirm destructive actions first. After three failed attempts at the same fix, stop and name the assumption that is now doubtful. If a request is ambiguous, ask one short question.

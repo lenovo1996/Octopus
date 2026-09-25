@@ -21,7 +21,8 @@ use crate::domain::{
     ApiResult, AppError, ConfirmationDetails, ErrorCode, RecoveryAction, RepoSnapshot, RequestId,
 };
 use crate::git::{
-    patch_fingerprint, read_worktree_patch, select_patch_hunk, DiffError, GitRunner, READ_TIMEOUT,
+    patch_fingerprint, read_index_patch, read_worktree_patch, select_patch_hunk,
+    select_patch_lines, DiffError, GitRunner, READ_TIMEOUT,
 };
 use crate::services::RepoRegistry;
 
@@ -454,6 +455,94 @@ async fn core_hunk_mutate(
     super::repos::build_snapshot(runner, registry, &fresh).await
 }
 
+/// What `core_lines_mutate` applies: one hunk plus the chosen changed-line
+/// ordinals, from the worktree patch (stage) or the staged patch (unstage).
+struct LinesSelection<'a> {
+    path_id: &'a str,
+    hunk_id: &'a str,
+    lines: &'a [u32],
+    staged_source: bool,
+}
+
+/// Stage (worktree source) or unstage (staged source) selected changed
+/// lines of one hunk. Line ordinals count `+`/`-` body rows only; the
+/// patch is rebuilt from current bytes immediately before applying, so a
+/// stale selection fails closed instead of staging the wrong lines.
+/// Staging never destroys data; unstaging restores the index from HEAD
+/// for exactly those lines while worktree bytes stay untouched.
+async fn core_lines_mutate(
+    runner: &GitRunner,
+    registry: &mut RepoRegistry,
+    repo_id: &str,
+    expected_version: u64,
+    selection: LinesSelection<'_>,
+) -> Result<RepoSnapshot, AppError> {
+    let session = registry.get(repo_id).ok_or_else(session_missing)?.clone();
+    if session.trust != crate::domain::TrustState::Trusted {
+        return Err(trust_required());
+    }
+    if session.version != expected_version {
+        return Err(stale_state());
+    }
+    if selection.hunk_id.len() > 64 || !selection.hunk_id.starts_with("h1:") {
+        return Err(bad_request("Malformed hunk id"));
+    }
+    if selection.lines.is_empty() || selection.lines.len() > 500 {
+        return Err(bad_request("Select 1..=500 changed lines"));
+    }
+    let (raw, _) = registry.status_resolve(repo_id, selection.path_id)?;
+    let patch = if selection.staged_source {
+        read_index_patch(runner, &session.worktree_root, &raw)
+            .await
+            .map_err(hunk_error)?
+    } else {
+        read_worktree_patch(runner, &session.worktree_root, &raw)
+            .await
+            .map_err(hunk_error)?
+    };
+    let selected =
+        select_patch_lines(&patch, selection.hunk_id, selection.lines).map_err(hunk_error)?;
+
+    let queue = registry.queue_for(&session.key());
+    let _guard = queue.lock().await;
+    let argv: &[&str] = if selection.staged_source {
+        &[
+            "apply",
+            "--cached",
+            "--reverse",
+            "--recount",
+            "--whitespace=nowarn",
+        ]
+    } else {
+        &["apply", "--cached", "--recount", "--whitespace=nowarn"]
+    };
+    let out = runner
+        .run_with_stdin(
+            &session.worktree_root,
+            argv,
+            &selected,
+            crate::git::WRITE_TIMEOUT,
+        )
+        .await
+        .map_err(|_| git_failed())?;
+    registry.bump(repo_id).ok_or_else(session_missing)?;
+    let fresh = registry.get(repo_id).ok_or_else(session_missing)?.clone();
+    if !out.success {
+        let _ = super::repos::build_snapshot(runner, registry, &fresh).await;
+        return Err(AppError::new(
+            ErrorCode::GIT_ERROR,
+            if selection.staged_source {
+                "Git could not unstage these lines; refresh the diff and retry"
+            } else {
+                "Git could not stage these lines; refresh the diff and retry"
+            },
+            RecoveryAction::Refresh,
+            true,
+        ));
+    }
+    super::repos::build_snapshot(runner, registry, &fresh).await
+}
+
 async fn core_discard_file(
     runner: &GitRunner,
     registry: &mut RepoRegistry,
@@ -523,6 +612,18 @@ pub struct HunkMutationRequest {
     pub expected_version: u64,
     pub path_id: String,
     pub hunk_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinesMutationRequest {
+    pub request_id: RequestId,
+    pub repo_id: String,
+    pub expected_version: u64,
+    pub path_id: String,
+    pub hunk_id: String,
+    /// 0-based ordinals among the hunk's `+`/`-` body rows.
+    pub lines: Vec<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -648,6 +749,53 @@ pub async fn diff_hunk_discard(
     })
 }
 
+async fn handle_lines(
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: LinesMutationRequest,
+    staged_source: bool,
+) -> Result<ApiResult<RepoSnapshot>, String> {
+    let request_id = request.request_id.clone();
+    let result = async {
+        check_request_id(&request_id)?;
+        let runner = git_runner()?;
+        let mut registry = registry.lock().await;
+        core_lines_mutate(
+            &runner,
+            &mut registry,
+            &request.repo_id,
+            request.expected_version,
+            LinesSelection {
+                path_id: &request.path_id,
+                hunk_id: &request.hunk_id,
+                lines: &request.lines,
+                staged_source,
+            },
+        )
+        .await
+    }
+    .await;
+    Ok(match result {
+        Ok(snapshot) => ApiResult::ok(snapshot, request_id),
+        Err(error) => ApiResult::err(error, request_id),
+    })
+}
+
+#[tauri::command]
+pub async fn diff_lines_stage(
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: LinesMutationRequest,
+) -> Result<ApiResult<RepoSnapshot>, String> {
+    handle_lines(registry, request, false).await
+}
+
+#[tauri::command]
+pub async fn diff_lines_unstage(
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: LinesMutationRequest,
+) -> Result<ApiResult<RepoSnapshot>, String> {
+    handle_lines(registry, request, true).await
+}
+
 #[tauri::command]
 pub async fn worktree_discard_file(
     registry: State<'_, Mutex<RepoRegistry>>,
@@ -677,8 +825,9 @@ pub async fn worktree_discard_file(
 
 pub mod prelude {
     pub use super::{
-        diff_hunk_discard, diff_hunk_stage, index_stage, index_unstage, worktree_discard_file,
-        DiscardFileRequest, DiscardHunkRequest, HunkMutationRequest, IndexMutationRequest,
+        diff_hunk_discard, diff_hunk_stage, diff_lines_stage, diff_lines_unstage, index_stage,
+        index_unstage, worktree_discard_file, DiscardFileRequest, DiscardHunkRequest,
+        HunkMutationRequest, IndexMutationRequest, LinesMutationRequest,
     };
 }
 
@@ -842,6 +991,119 @@ mod tests {
         assert_eq!(
             std::fs::read(repo.join("first.txt")).expect("read"),
             b"hello\n"
+        );
+    }
+
+    fn show_staged(runner_file: &std::path::Path, spec: &str) -> Vec<u8> {
+        let out = StdCommand::new("git")
+            .current_dir(runner_file)
+            .args(["show", spec])
+            .output()
+            .expect("git show");
+        assert!(out.status.success(), "git show {spec} failed");
+        out.stdout
+    }
+
+    fn first_hunk_id(patch: &[u8]) -> String {
+        let start = patch
+            .windows(4)
+            .position(|w| w == b"@@ -")
+            .expect("one hunk");
+        crate::git::patch_fingerprint(&patch[start..])
+    }
+
+    #[tokio::test]
+    async fn lines_stage_and_unstage_move_exact_lines() {
+        let (_dir, repo) = temp_repo("lines");
+        std::fs::write(repo.join("a.txt"), "a\nb\nc\nd\n").expect("write");
+        git(&repo, &["add", "a.txt"]);
+        git(&repo, &["commit", "-m", "base"]);
+        std::fs::write(repo.join("a.txt"), "a\nB\nc\nD\nE\n").expect("write");
+
+        let runner = git_runner().expect("system git");
+        let mut registry = RepoRegistry::default();
+        let repo_id = open_repo(&mut registry, &repo, TrustState::Trusted);
+        let version = registry.get(&repo_id).expect("session").version;
+        let ids = live_ids(&runner, &mut registry, &repo_id).await;
+        let path_id = ids[0].1.clone();
+
+        // Hunk ordinals: 0:-b 1:+B 2:-d 3:+D 4:+E. Stage only the "+B"
+        // line: like a hand-edited `git add -p` hunk, the dropped `-b`
+        // anchors as context, so B lands right after it in the index.
+        let session = registry.get(&repo_id).expect("session").clone();
+        let patch = crate::git::read_worktree_patch(&runner, &session.worktree_root, b"a.txt")
+            .await
+            .expect("worktree patch");
+        let hunk_id = first_hunk_id(&patch);
+        core_lines_mutate(
+            &runner,
+            &mut registry,
+            &repo_id,
+            version,
+            LinesSelection {
+                path_id: &path_id,
+                hunk_id: &hunk_id,
+                lines: &[1],
+                staged_source: false,
+            },
+        )
+        .await
+        .expect("stage one line");
+        assert_eq!(show_staged(&repo, ":a.txt"), b"a\nb\nB\nc\nd\n");
+        // Worktree bytes are never touched by staging.
+        assert_eq!(
+            std::fs::read(repo.join("a.txt")).expect("read"),
+            b"a\nB\nc\nD\nE\n"
+        );
+
+        // Stale hunk ids fail closed without writing.
+        let ids = live_ids(&runner, &mut registry, &repo_id).await;
+        let version = registry.get(&repo_id).expect("session").version;
+        let stale = core_lines_mutate(
+            &runner,
+            &mut registry,
+            &repo_id,
+            version,
+            LinesSelection {
+                path_id: &ids[0].1,
+                hunk_id: "h1:00000000000000000000000000000000",
+                lines: &[0],
+                staged_source: false,
+            },
+        )
+        .await;
+        assert!(matches!(
+            stale,
+            Err(ref e) if e.code == ErrorCode::STALE_STATE
+        ));
+
+        // Unstage exactly that line from the staged view: the staged diff
+        // holds a single "+B" change (ordinal 0).
+        let ids = live_ids(&runner, &mut registry, &repo_id).await;
+        let version = registry.get(&repo_id).expect("session").version;
+        let session = registry.get(&repo_id).expect("session").clone();
+        let staged = crate::git::read_index_patch(&runner, &session.worktree_root, b"a.txt")
+            .await
+            .expect("staged patch");
+        let staged_hunk = first_hunk_id(&staged);
+        core_lines_mutate(
+            &runner,
+            &mut registry,
+            &repo_id,
+            version,
+            LinesSelection {
+                path_id: &ids[0].1,
+                hunk_id: &staged_hunk,
+                lines: &[0],
+                staged_source: true,
+            },
+        )
+        .await
+        .expect("unstage one line");
+        assert_eq!(show_staged(&repo, ":a.txt"), b"a\nb\nc\nd\n");
+        assert_eq!(
+            std::fs::read(repo.join("a.txt")).expect("read"),
+            b"a\nB\nc\nD\nE\n"
         );
     }
 

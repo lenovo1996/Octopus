@@ -23,10 +23,13 @@ importers:
         version: 10.0.1(eslint@10.11.0)
       '@sveltejs/vite-plugin-svelte':
         specifier: 7.3.0
-        version: 7.3.0(svelte@5.57.1(@typescript-eslint/types@8.70.1))(vite@8.3.0)
+        version: 7.3.0(svelte@5.57.1(@typescript-eslint/types@8.70.1))(vite@8.3.0(@types/node@24.13.6))
       '@tauri-apps/cli':
         specifier: 2.11.5
         version: 2.11.5
+      '@types/node':
+        specifier: 24.13.6
+        version: 24.13.6
       eslint:
         specifier: 10.11.0
         version: 10.11.0
@@ -44,10 +47,10 @@ importers:
         version: 8.70.1(eslint@10.11.0)(typescript@6.0.3)
       vite:
         specifier: 8.3.0
-        version: 8.3.0
+        version: 8.3.0(@types/node@24.13.6)
       vitest:
         specifier: 5.0.1
-        version: 5.0.1(vite@8.3.0)
+        version: 5.0.1(@types/node@24.13.6)(vite@8.3.0(@types/node@24.13.6))
 
 packages:
 
@@ -358,6 +361,9 @@ packages:
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
+
+  '@types/node@24.13.6':
+    resolution: {integrity: sha512-SGrw/h3KPFshy3OE6ZL53LMBG5vGQQ8/gIpiqz/kRZhPJ7HgwCEs8LBuNtWLa8dvGZVpSF7+Bf+c11HUrCb/yg==}
 
   '@typescript-eslint/eslint-plugin@8.70.1':
     resolution: {integrity: sha512-nDNrUQ/4ruSNYbu749TRY7cfrzPtoLHEXSNBI8aaNY32LlZCajixqRf3FqcKC4p5Cam4VOHYx/t+i5+nKXvrqA==}
@@ -901,6 +907,9 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  undici-types@7.18.2:
+    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
 
@@ -1163,14 +1172,14 @@ snapshots:
 
   '@sveltejs/load-config@0.2.3': {}
 
-  '@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.1(@typescript-eslint/types@8.70.1))(vite@8.3.0)':
+  '@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.1(@typescript-eslint/types@8.70.1))(vite@8.3.0(@types/node@24.13.6))':
     dependencies:
       deepmerge: 4.3.1
       magic-string: 1.4.1
       obug: 2.2.1
       svelte: 5.57.1(@typescript-eslint/types@8.70.1)
-      vite: 8.3.0
-      vitefu: 1.1.3(vite@8.3.0)
+      vite: 8.3.0(@types/node@24.13.6)
+      vitefu: 1.1.3(vite@8.3.0(@types/node@24.13.6))
 
   '@tauri-apps/api@2.11.1': {}
 
@@ -1241,6 +1250,10 @@ snapshots:
   '@types/estree@1.0.9': {}
 
   '@types/json-schema@7.0.15': {}
+
+  '@types/node@24.13.6':
+    dependencies:
+      undici-types: 7.18.2
 
   '@typescript-eslint/eslint-plugin@8.70.1(@typescript-eslint/parser@8.70.1(eslint@10.11.0)(typescript@6.0.3))(eslint@10.11.0)(typescript@6.0.3)':
     dependencies:
@@ -1333,14 +1346,14 @@ snapshots:
       '@typescript-eslint/types': 8.70.1
       eslint-visitor-keys: 5.0.1
 
-  '@vitest/mocker@5.0.1(vite@8.3.0)':
+  '@vitest/mocker@5.0.1(vite@8.3.0(@types/node@24.13.6))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.1
       estree-walker: 3.0.3
       magic-string: 1.4.1
     optionalDependencies:
-      vite: 8.3.0
+      vite: 8.3.0(@types/node@24.13.6)
 
   '@vitest/spy@5.0.1': {}
 
@@ -1780,11 +1793,13 @@ snapshots:
 
   typescript@6.0.3: {}
 
+  undici-types@7.18.2: {}
+
   uri-js@4.4.1:
     dependencies:
       punycode: 2.3.1
 
-  vite@8.3.0:
+  vite@8.3.0(@types/node@24.13.6):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -1792,16 +1807,17 @@ snapshots:
       rolldown: 1.2.9
       tinyglobby: 0.2.17
     optionalDependencies:
+      '@types/node': 24.13.6
       fsevents: 2.3.3
 
-  vitefu@1.1.3(vite@8.3.0):
+  vitefu@1.1.3(vite@8.3.0(@types/node@24.13.6)):
     optionalDependencies:
-      vite: 8.3.0
+      vite: 8.3.0(@types/node@24.13.6)
 
-  vitest@5.0.1(vite@8.3.0):
+  vitest@5.0.1(@types/node@24.13.6)(vite@8.3.0(@types/node@24.13.6)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.1(vite@8.3.0)
+      '@vitest/mocker': 5.0.1(vite@8.3.0(@types/node@24.13.6))
       chai: 6.2.2
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -1812,8 +1828,10 @@ snapshots:
       tinybench: 6.1.4
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
-      vite: 8.3.0
+      vite: 8.3.0(@types/node@24.13.6)
       why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/node': 24.13.6
     transitivePeerDependencies:
       - msw
 

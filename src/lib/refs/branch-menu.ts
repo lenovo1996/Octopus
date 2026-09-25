@@ -5,6 +5,7 @@
 // Tags keep a smaller menu (show + copies).
 import type { RefItem } from "../ipc/types";
 import type { ContextMenuItem } from "../context-menu/model";
+import { suggestedTrackName } from "./filter";
 
 export type BranchMenuAction =
   | "checkout"
@@ -62,6 +63,25 @@ export function pullRequestTargetName(ref: RefItem): string {
     : ref.label;
   const slash = withoutPrefix.indexOf("/");
   return slash >= 0 ? withoutPrefix.slice(slash + 1) : withoutPrefix;
+}
+
+export interface CheckoutTarget {
+  refId: string;
+  /** Local name to create when tracking a remote without a local twin. */
+  trackAs: string | null;
+}
+
+/**
+ * Resolve a Checkout menu action. A remote whose suggested local name
+ * already exists checks out that local twin directly (plain `git switch`
+ * DWIM) instead of opening the branches dialog.
+ */
+export function resolveCheckoutTarget(refs: RefItem[], ref: RefItem): CheckoutTarget {
+  if (ref.kind !== "remote") return { refId: ref.refId, trackAs: null };
+  const name = suggestedTrackName(ref.label);
+  const twin = refs.find((r) => r.kind === "local" && r.label === name);
+  if (twin) return { refId: twin.refId, trackAs: null };
+  return { refId: ref.refId, trackAs: name };
 }
 
 export function buildBranchMenuItems(

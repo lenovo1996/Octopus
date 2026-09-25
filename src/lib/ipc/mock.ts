@@ -317,6 +317,24 @@ const mockAdapter = {
     else rows[index].worktreeStatus = " ";
     return mockSessionWithCounts();
   },
+  async diffLinesStage(repoId: string, _expectedVersion: number, pathId: string, hunkId: string, lines: number[]): Promise<RepoSnapshot> {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    if (hunkId !== "demo-hunk-1" && hunkId !== "demo-hunk-2") throw staleMockError("The diff changed; refresh it and retry.");
+    if (!Array.isArray(lines) || lines.length === 0) throw staleMockError("Select at least one changed line.");
+    const row = mockWorktree(repoId).find((file) => file.pathId === pathId);
+    if (!row || row.worktreeStatus === "?") throw staleMockError();
+    row.indexStatus = "M";
+    return mockSessionWithCounts();
+  },
+  async diffLinesUnstage(repoId: string, _expectedVersion: number, pathId: string, hunkId: string, lines: number[]): Promise<RepoSnapshot> {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    if (hunkId !== "demo-hunk-1" && hunkId !== "demo-hunk-2") throw staleMockError("The diff changed; refresh it and retry.");
+    if (!Array.isArray(lines) || lines.length === 0) throw staleMockError("Select at least one changed line.");
+    const row = mockWorktree(repoId).find((file) => file.pathId === pathId);
+    if (!row) throw staleMockError();
+    row.worktreeStatus = "M";
+    return mockSessionWithCounts();
+  },
   async operationGet(operationId: string): Promise<OperationRecord> {
     await new Promise((resolve) => setTimeout(resolve, 10));
     return {
@@ -602,6 +620,19 @@ const mockAdapter = {
             { kind: "add", oldLine: null, newLine: 13, text: "// keep lane across page boundary" },
             { kind: "add", oldLine: null, newLine: 14, text: "lane = carryLane(row);" },
             { kind: "noNewline", oldLine: null, newLine: null, text: "" }
+          ]
+        },
+        {
+          hunkId: "demo-hunk-2",
+          header: "@@ -30,4 +30,5 @@",
+          oldStart: 30,
+          newStart: 30,
+          lines: [
+            { kind: "context", oldLine: 30, newLine: 30, text: "flush(viewport);" },
+            { kind: "delete", oldLine: 31, newLine: null, text: "limit = 24;" },
+            { kind: "add", oldLine: null, newLine: 31, text: "limit = laneCount;" },
+            { kind: "add", oldLine: null, newLine: 32, text: "clamp(limit, 1, 64);" },
+            { kind: "context", oldLine: 32, newLine: 33, text: "paint(lanes);" }
           ]
         }
       ],

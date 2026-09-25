@@ -10,9 +10,9 @@ pub use commit::{
     commit_staged, has_unmerged, index_is_empty, read_identity, CommitError, Identity,
 };
 pub use diff::{
-    empty_tree_hash, patch_fingerprint, read_commit_diff, read_index_diff, read_worktree_diff,
-    read_worktree_patch, select_patch_hunk, DiffError, MAX_DIFF_BYTES, MAX_DIFF_LINES,
-    MAX_PREVIEW_BYTES,
+    empty_tree_hash, patch_fingerprint, read_commit_diff, read_index_diff, read_index_patch,
+    read_worktree_diff, read_worktree_patch, select_patch_hunk, select_patch_lines, DiffError,
+    MAX_DIFF_BYTES, MAX_DIFF_LINES, MAX_PREVIEW_BYTES,
 };
 pub use discover::{discover, validate_branch_name, DiscoveredRepo};
 pub use history::{

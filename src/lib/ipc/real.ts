@@ -204,6 +204,26 @@ export const realAdapter = {
       confirmationToken
     });
   },
+  async diffLinesStage(repoId: RepoId, expectedVersion: number, pathId: string, hunkId: string, lines: number[]): Promise<RepoSnapshot> {
+    return invokeCommand<RepoSnapshot>("diff_lines_stage", {
+      requestId: newRequestId(),
+      repoId,
+      expectedVersion,
+      pathId,
+      hunkId,
+      lines
+    });
+  },
+  async diffLinesUnstage(repoId: RepoId, expectedVersion: number, pathId: string, hunkId: string, lines: number[]): Promise<RepoSnapshot> {
+    return invokeCommand<RepoSnapshot>("diff_lines_unstage", {
+      requestId: newRequestId(),
+      repoId,
+      expectedVersion,
+      pathId,
+      hunkId,
+      lines
+    });
+  },
   async identityRead(repoId: RepoId): Promise<IdentityInfo> {
     return invokeCommand<IdentityInfo>("identity_read", { requestId: newRequestId(), repoId });
   },

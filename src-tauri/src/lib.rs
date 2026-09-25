@@ -42,6 +42,8 @@ pub fn run() {
             index_unstage,
             diff_hunk_stage,
             diff_hunk_discard,
+            diff_lines_stage,
+            diff_lines_unstage,
             worktree_discard_file,
             identity_read,
             commit_create,

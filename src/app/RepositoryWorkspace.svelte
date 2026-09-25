@@ -22,7 +22,7 @@
   import { COMMIT_ACTION_FORMS } from "../lib/history/commit-action-forms";
   import type { CommitActionId } from "../lib/history/commit-menu";
   import type { BranchFormOverride } from "../lib/history/commit-action-forms";
-  import { pullRequestTargetName, type BranchMenuAction } from "../lib/refs/branch-menu";
+  import { pullRequestTargetName, resolveCheckoutTarget, type BranchMenuAction } from "../lib/refs/branch-menu";
   import Inspector from "../lib/components/Inspector.svelte";
   import Sidebar from "../lib/components/Sidebar.svelte";
   import Splitter from "../lib/components/Splitter.svelte";
@@ -57,7 +57,7 @@
   } from "../lib/ipc/types";
   import { collectDiscardAllTargets, discardAllSummary } from "../lib/status/discard-all";
   import { summarizeWorkingChanges } from "../lib/status/partition";
-  import { suggestedTrackName } from "../lib/refs/filter";
+
   import { SearchController } from "../lib/search/controller";
   import { clampWidth, initialShell, SHELL_LIMITS, type InspectorState } from "../lib/state/shell";
   import { layoutGraph } from "../lib/graph/layout";
@@ -153,6 +153,21 @@
     return null;
   });
   const canMutateHunks = $derived(diff.selection?.target.kind === "worktree" && hunkMutationHint === null && !indexBusy);
+  const lineMode = $derived.by(() => {
+    const kind = diff.selection?.target.kind;
+    if (kind === "worktree") return "stage" as const;
+    if (kind === "index") return "unstage" as const;
+    return null;
+  });
+  const canMutateIndexLines = $derived(
+    diff.selection?.target.kind === "index" &&
+      diff.doc?.kind === "text" &&
+      !diff.doc?.truncated &&
+      !indexBusy
+  );
+  const linesMutable = $derived(
+    lineMode === "stage" ? canMutateHunks : lineMode === "unstage" ? canMutateIndexLines : false
+  );
 
   // Commit editor (T10). Subject lives in shell (survives tab switches);
   // body is session-local. Both survive failures, cleared only on success.
@@ -1518,6 +1533,48 @@
     }
   }
 
+  async function refreshOpenIndexDiff(displayPath: string): Promise<void> {
+    await loadStatus();
+    const row = statusFiles?.find((file) => file.displayPath === displayPath && ![" ", "!"].includes(file.indexStatus));
+    if (!row || !session) {
+      clearDiff();
+      return;
+    }
+    await diffController.open({ repoId: session.repoId, path: row.displayPath, target: { kind: "index", pathId: row.pathId } });
+  }
+
+  async function mutateLines(hunkId: string, lines: number[], unstage: boolean): Promise<void> {
+    const target = diff.selection?.target;
+    const displayPath = diff.selection?.path;
+    const want = unstage ? "index" : "worktree";
+    if (!session || indexBusy || target?.kind !== want || !displayPath || lines.length === 0) return;
+    const current = session;
+    indexBusy = true;
+    indexError = null;
+    try {
+      const adapter = statusAdapter();
+      session = unstage
+        ? await adapter.diffLinesUnstage(current.repoId, current.version, target.pathId, hunkId, lines)
+        : await adapter.diffLinesStage(current.repoId, current.version, target.pathId, hunkId, lines);
+      if (unstage) await refreshOpenIndexDiff(displayPath);
+      else await refreshOpenWorktreeDiff(displayPath);
+    } catch (error) {
+      indexError = error as AppError;
+      await resyncMutationFailure(current);
+      clearDiff();
+    } finally {
+      if (session?.repoId === current.repoId) indexBusy = false;
+    }
+  }
+
+  async function stageLines(hunkId: string, lines: number[]): Promise<void> {
+    await mutateLines(hunkId, lines, false);
+  }
+
+  async function unstageLines(hunkId: string, lines: number[]): Promise<void> {
+    await mutateLines(hunkId, lines, true);
+  }
+
   /** Single confirmation for every unstaged file; execution still uses
    * per-file backend tokens so each discard stays fingerprint-bound. */
   function askDiscardAll(): void {
@@ -1763,28 +1820,14 @@
   async function branchAction(kind: BranchMenuAction, ref: RefItem): Promise<void> {
     if (!session) return;
     switch (kind) {
-      case "checkout":
-        if (ref.kind === "local") {
-          await switchBranch(ref.refId);
-        } else {
-          // Remote checkout creates a local tracking branch and switches to
-          // it (`git switch -c`); dirty worktrees go through the stash offer
-          // inside switchBranch.
-          const name = suggestedTrackName(ref.label);
-          const localExists = refs.some((r) => r.kind === "local" && r.label === name);
-          if (!localExists) {
-            await switchBranch(ref.refId, name);
-          } else {
-            // The default name is taken locally (`git switch -c` would
-            // refuse): open Branches prefilled so the user picks another
-            // local name and Tracks that row instead.
-            trackName = name;
-            branchError = null;
-            deleteConfirm = null;
-            showBranches = true;
-          }
-        }
+      case "checkout": {
+        // Remote checkout without a local twin creates a tracking branch
+        // (`git switch -c`); a twin checks out directly. Dirty worktrees go
+        // through the stash offer inside switchBranch.
+        const target = resolveCheckoutTarget(refs, ref);
+        await switchBranch(target.refId, target.trackAs);
         return;
+      }
       case "merge":
         mergeError = null;
         mergeSource = ref.refId;
@@ -2680,6 +2723,10 @@
             mutationError={indexError ? `${indexError.code}: ${indexError.message}` : null}
             onStageHunk={(hunkId) => void stageHunk(hunkId)}
             onDiscardHunk={(hunkId) => void askDiscardHunk(hunkId)}
+            {lineMode}
+            {linesMutable}
+            onStageLines={(hunkId, lines) => void stageLines(hunkId, lines)}
+            onUnstageLines={(hunkId, lines) => void unstageLines(hunkId, lines)}
           />
         {/key}
       {/if}

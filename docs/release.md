@@ -1,37 +1,37 @@
 # Release
 
-[Release Octopus](../.github/workflows/release.yml) tạo release chính thức cho mỗi lần push vào `main`, gồm merge, squash, rebase và direct push. Có thể chạy thủ công trong Actions → Release Octopus → Run workflow → `main`. Branch khác sẽ skip.
+[Release Octopus](../.github/workflows/release.yml) creates an official release for every push to `main`, including merge, squash, rebase, and direct pushes. It can also be started manually from Actions → Release Octopus → Run workflow → `main`. Other branches are skipped.
 
 ## Pipeline
 
-1. `checks` gọi [CI](../.github/workflows/ci.yml): release tooling, Svelte/TypeScript, ESLint, Vitest, Rust fmt/clippy/tests. Check fail thì không build/publish.
-2. `build` trên Ubuntu 24.04 x86_64 cài dependencies, stamp version trong checkout CI, rồi chạy `pnpm tauri build --ci --bundles deb,rpm,appimage -- --locked`. Phải có đủ ba packages và `SHA256SUMS`; Actions artifacts giữ 14 ngày.
-3. `publish` dùng `GITHUB_TOKEN`, tạo draft tại đúng source SHA, upload assets rồi publish với `draft=false`, `prerelease=false`. Chỉ job này có `contents: write`; không cần PAT. Repository/organization phải cho phép quyền workflow đã khai báo.
+1. `checks` invokes [CI](../.github/workflows/ci.yml): release tooling, Svelte/TypeScript, ESLint, Vitest, and Rust fmt/clippy/tests. A failed check prevents the build and publication jobs from running.
+2. `build` runs on Ubuntu 24.04 x86_64, installs dependencies, stamps the version inside the CI checkout, then runs `pnpm tauri build --ci --bundles deb,rpm,appimage -- --locked`. All three packages and `SHA256SUMS` are required. The Actions artifact is retained for 14 days.
+3. `publish` uses `GITHUB_TOKEN`, creates a draft at the exact source SHA, uploads the assets, and publishes it with `draft=false` and `prerelease=false`. Only this job has `contents: write`; no PAT is required. Repository or organization policy must allow the declared workflow permission.
 
-## Version và chạy lại
+## Versioning and reruns
 
-Version là `MAJOR.MINOR.GITHUB_RUN_NUMBER`: source `0.1.0` + run 42 → `0.1.42`, tag `v0.1.42`. Major/minor lấy từ source; patch thay bằng số run. Failed runs có thể để lại khoảng trống. Không bump patch thủ công để release.
+The version is `MAJOR.MINOR.GITHUB_RUN_NUMBER`: source `0.1.0` plus run 42 becomes `0.1.42` with tag `v0.1.42`. Major and minor come from source; the patch number is replaced by the run number. Failed runs may leave gaps. Do not bump the patch version manually for a release.
 
-[prepare-release.py](../scripts/prepare-release.py) đồng bộ package.json, Tauri config, Cargo manifest và local package entry trong Cargo.lock; không đổi dependency lock hoặc commit/push version bump. Khi mở dòng phát hành mới, cập nhật major/minor đồng bộ ở bốn file. Không reset run counter trong cùng dòng version để tránh trùng tag.
+[prepare-release.py](../scripts/prepare-release.py) synchronizes package.json, the Tauri configuration, the Cargo manifest, and the local package entry in Cargo.lock. It does not change dependency locks or commit/push a version bump. When starting a new release line, update major/minor consistently in all four files. Do not reset the workflow run counter within the same release line, because that can create duplicate tags.
 
-Mỗi merge có version riêng; workflow không hủy các runs đang chờ. `make_latest=legacy` để GitHub chọn Latest theo ngày tạo và semantic version khi builds kết thúc khác thứ tự.
+Every merge receives its own version, and the workflow does not cancel queued runs. `make_latest=legacy` lets GitHub choose Latest using creation time and semantic version when builds finish out of order.
 
-[publish-release.sh](../scripts/publish-release.sh) giữ nguyên release đã publish khi rerun; tiếp tục upload draft dở; từ chối tag/release trỏ commit khác. Lỗi quyền/network không được hiểu là release chưa tồn tại. Build/upload lỗi không được bỏ qua. Sau khi xử lý lỗi, dùng Re-run failed jobs trong Actions.
+[publish-release.sh](../scripts/publish-release.sh) leaves an already published release unchanged on rerun, resumes an incomplete draft upload, and rejects a tag or release that points to another commit. Permission and network failures are not treated as a missing release. Build and upload failures are not ignored. After resolving a failure, use Re-run failed jobs in Actions.
 
 ## Packages
 
-| File | Mục đích |
+| File | Purpose |
 |---|---|
 | `Octopus_VERSION_amd64.deb` | Debian/Ubuntu |
 | `Octopus-VERSION-1.x86_64.rpm` | RPM-based distributions |
-| `Octopus_VERSION_amd64.AppImage` | Portable bundle; cần quyền executable |
-| `SHA256SUMS` | Kiểm tra integrity bằng `sha256sum --check SHA256SUMS` |
+| `Octopus_VERSION_amd64.AppImage` | Portable bundle; requires executable permission |
+| `SHA256SUMS` | Verify integrity with `sha256sum --check SHA256SUMS` |
 
-Baseline là Ubuntu 24.04 x86_64 và system Git ≥ 2.43. Workflow này chưa gồm Windows/macOS, signing hoặc updater. Các native workflow còn thiếu được ghi trong [development.md](development.md#trạng-thái-kiểm-chứng); release notes liên kết tài liệu tại đúng source commit.
+The baseline is Ubuntu 24.04 x86_64 with system Git ≥ 2.43. This workflow does not yet include Windows/macOS, signing, or an updater. Missing native workflow coverage is documented in [development.md](development.md#verification-status); release notes link to the documentation at the exact source commit.
 
-## Build và kiểm tra local
+## Local build and verification
 
-Setup cơ bản: [README](../README.md#chạy-từ-source). Để bundle cả ba định dạng trên Ubuntu 24.04, cần thêm `patchelf`, `xdg-utils`, `file`, `libfuse2t64` như workflow.
+See the basic setup in the [README](../README.md#run-from-source). Building all three bundle formats on Ubuntu 24.04 also requires `patchelf`, `xdg-utils`, `file`, and `libfuse2t64`, as installed by the workflow.
 
 ```sh
 python3 -B tests/release/check-release.py
@@ -39,6 +39,6 @@ bash -n scripts/publish-release.sh
 pnpm tauri build --ci --bundles deb,rpm,appimage -- --locked
 ```
 
-Tests dùng repos/files tạm và `gh` giả; không publish thật. Đóng executable trong `src-tauri/target/release/` trước khi build lại nếu gặp `Text file busy`. Không bật test-only features trong release.
+Tests use temporary repositories/files and a fake `gh`; they do not publish a real release. If a rebuild fails with `Text file busy`, close the executable in `src-tauri/target/release/` first. Do not enable test-only features in a release build.
 
-Lần GitHub-hosted build/publish đầu tiên còn **chưa chạy** cho đến khi files được đưa lên GitHub và trigger workflow.
+The first GitHub-hosted build and publication remain **not run** until the files are pushed to GitHub and the workflow is triggered.
