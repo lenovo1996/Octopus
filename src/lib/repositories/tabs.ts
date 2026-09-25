@@ -36,6 +36,27 @@ export function activeWorkspaceKey(
   return tabs.find((tab) => tab.snapshot.repoId === activeId)?.snapshot.workspaceKey ?? null;
 }
 
+/**
+ * Reorder tabs by repo id: move `fromId` before (`before: true`) or after
+ * (`before: false`) `toId`. Unknown ids and no-op moves return the list
+ * untouched so callers can assign blindly; the persist effect saves the
+ * resulting order.
+ */
+export function reorderTabs<T extends { snapshot: RepoSnapshot }>(
+  tabs: T[],
+  fromId: string,
+  toId: string,
+  before: boolean
+): T[] {
+  const from = tabs.findIndex((tab) => tab.snapshot.repoId === fromId);
+  const to = tabs.findIndex((tab) => tab.snapshot.repoId === toId);
+  if (from < 0 || to < 0 || from === to) return tabs;
+  const next = tabs.filter((_, index) => index !== from);
+  const at = next.findIndex((tab) => tab.snapshot.repoId === toId);
+  next.splice(before ? at : at + 1, 0, tabs[from]);
+  return next;
+}
+
 /** Pick the tab to activate after a restore: saved active first, else first opened. */
 export function resolveRestoredActive(
   opened: RepoSnapshot[],

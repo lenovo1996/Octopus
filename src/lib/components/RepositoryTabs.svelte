@@ -4,12 +4,44 @@
   import { headLabel } from "../../mocks/demoSession";
   import ContextMenu from "./ContextMenu.svelte";
   import { isContextMenuKey, pointFromContextEvent, type ContextMenuItem } from "../context-menu/model";
-  let { tabs, activeId, opening, closingIds, onSelect, onClose, onAdd }: {
+  let { tabs, activeId, opening, closingIds, onSelect, onClose, onAdd, onMove }: {
     tabs: WorkspaceState[]; activeId: string | null; opening: boolean; closingIds: string[];
     onSelect: (id: string) => void; onClose: (id: string) => void; onAdd: () => void;
+    onMove: (fromId: string, toId: string, before: boolean) => void;
   } = $props();
   let list: HTMLDivElement | undefined = $state();
   let tabMenu = $state<{ id: string; x: number; y: number } | null>(null);
+  let dragId: string | null = $state(null);
+  let dropTarget = $state<{ id: string; before: boolean } | null>(null);
+  const draggable = $derived(tabs.length > 1);
+
+  function dragStart(event: DragEvent, id: string): void {
+    dragId = id;
+    dropTarget = null;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      // Firefox requires data for dragstart to fire reliably.
+      event.dataTransfer.setData("text/plain", id);
+    }
+  }
+  function dragOverTab(event: DragEvent, id: string): void {
+    if (!dragId || dragId === id) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const rect = event.currentTarget as HTMLElement;
+    const box = rect.getBoundingClientRect();
+    dropTarget = { id, before: event.clientX < box.left + box.width / 2 };
+  }
+  function dropOnTab(event: DragEvent, id: string): void {
+    event.preventDefault();
+    if (dragId && dragId !== id && dropTarget?.id === id) onMove(dragId, id, dropTarget.before);
+    dragId = null;
+    dropTarget = null;
+  }
+  function dragEnd(): void {
+    dragId = null;
+    dropTarget = null;
+  }
   $effect(() => {
     activeId;
     void tick().then(() => list?.querySelector('[aria-selected="true"]')?.scrollIntoView({block:"nearest",inline:"nearest"}));
@@ -39,9 +71,16 @@
   function menuItems(tab: WorkspaceState): ContextMenuItem[] {
     const repo = tab.snapshot;
     const closing = closingIds.includes(repo.repoId);
+    const index = tabs.findIndex(item => item.snapshot.repoId === repo.repoId);
+    const move = (delta: -1 | 1) => () => {
+      const neighbor = tabs[index + delta];
+      if (neighbor) onMove(repo.repoId, neighbor.snapshot.repoId, delta < 0);
+    };
     return [
       { id:"switch", label:repo.repoId === activeId ? "Current repository" : "Switch to repository", disabled:repo.repoId === activeId,
         action:() => onSelect(repo.repoId) },
+      { id:"move-left", label:"Move tab left", disabled:index <= 0, action:move(-1) },
+      { id:"move-right", label:"Move tab right", disabled:index < 0 || index >= tabs.length - 1, action:move(1) },
       { id:"copy-path", label:"Copy repository path", action:() => navigator.clipboard.writeText(repo.displayPath) },
       { id:"open-another", label:"Open another repository…", separatorBefore:true, disabled:opening, action:onAdd },
       { id:"close", label:"Close repository tab", hint:repo.repoId === activeId ? "Ctrl W" : undefined,
@@ -52,14 +91,22 @@
 
 <nav class="gd-repositories" aria-label="Repository workspace">
   <span class="gd-brand" title="Open repositories"><img src="/brand/octopus-128.png" alt="" width="28" height="28" />Octopus<span>{tabs.length}</span></span>
-  <div class="gd-tabs" role="tablist" aria-label="Open repositories" bind:this={list}>
+  <div class="gd-tabs" role="tablist" aria-label="Open repositories" bind:this={list}
+    ondragover={(event) => { if (dragId) event.preventDefault(); }}
+    ondrop={(event) => { event.preventDefault(); dragEnd(); }}>
     {#each tabs as tab (tab.snapshot.repoId)}
       {@const repo = tab.snapshot}
       {@const selected = repo.repoId === activeId}
       {@const closing = closingIds.includes(repo.repoId)}
       {@const duplicateName = tabs.some(other => other.snapshot.repoId !== repo.repoId && other.snapshot.displayName === repo.displayName)}
-      <div class="gd-tab-wrap" class:selected class:contexted={tabMenu?.id === repo.repoId} role="presentation"
-        oncontextmenu={(event) => openTabMenu(event, repo.repoId)} onkeydown={(event) => tabMenuKey(event, repo.repoId)}>
+      <div class="gd-tab-wrap" class:selected class:contexted={tabMenu?.id === repo.repoId}
+        class:dragging={dragId === repo.repoId}
+        class:drop-before={dropTarget?.id === repo.repoId && dropTarget.before}
+        class:drop-after={dropTarget?.id === repo.repoId && !dropTarget.before}
+        role="presentation" draggable={draggable}
+        oncontextmenu={(event) => openTabMenu(event, repo.repoId)} onkeydown={(event) => tabMenuKey(event, repo.repoId)}
+        ondragstart={(event) => dragStart(event, repo.repoId)} ondragend={dragEnd}
+        ondragover={(event) => dragOverTab(event, repo.repoId)} ondrop={(event) => dropOnTab(event, repo.repoId)}>
         <button class="gd-repo-tab" role="tab" id={`repo-tab-${repo.repoId}`} aria-controls={`repo-panel-${repo.repoId}`}
           aria-selected={selected} tabindex={selected ? 0 : -1} title={`${repo.displayPath}\n${headLabel(repo.head)}${tab.hasDraft ? "\nCommit draft saved" : ""}`}
           aria-label={`Repository ${repo.displayName}${duplicateName ? ` · ${repositoryParent(repo.displayPath)}` : ""}`}
@@ -95,6 +142,9 @@
   .gd-tab-wrap { display: flex; align-items: center; flex: 0 0 auto; max-width: 290px; min-width: 174px; border-right: 1px solid var(--gd-border); border-top: 2px solid transparent; padding-right: 7px; }
   .gd-tab-wrap.selected { background: var(--gd-panel); border-top-color: var(--gd-accent); }
   .gd-tab-wrap.contexted { background: var(--gd-surface-hover); box-shadow: inset 0 -2px var(--gd-focus); }
+  .gd-tab-wrap.dragging { opacity: .4; }
+  .gd-tab-wrap.drop-before { box-shadow: inset 2px 0 var(--gd-accent); }
+  .gd-tab-wrap.drop-after { box-shadow: inset -2px 0 var(--gd-accent); }
   .gd-repo-tab { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; padding: 5px 9px 7px 12px; border: 0; background: transparent; color: var(--gd-text-secondary); text-align: left; cursor: pointer; }
   .selected .gd-repo-tab { color: var(--gd-text); }
   .selected svg { color: var(--gd-accent); }

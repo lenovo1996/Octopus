@@ -23,3 +23,9 @@
 
 - Remote `https://user@bitbucket.org/...` bị nhánh parse SSH short-form chặn trước (userinfo chứa `/` nên return None), nhánh https strip userinfo phía sau thành dead code. Fix: parse scheme trước, SSH chỉ khi không có `://`.
 - Tests: thêm case userinfo bitbucket/github vào test detect sẵn có (fail trước, pass sau). Rust 153/153, clippy sạch. Build đủ 3 bundle.
+
+## Kéo-thả sắp xếp repository trên header (2026-09-24)
+
+- Tab header kéo-thả được (HTML5 DnD + chỉ báo before/after), kèm menu "Move tab left/right" cho keyboard. Thứ tự mới tự persist qua effect `workspacesSave` sẵn có.
+- Helper `reorderTabs` trong `tabs.ts` + test `tab-order.test.ts` (fail trước, pass sau). Full unit 132/132, lint + check sạch.
+- CDP demo 2 tab: kéo tab 1 qua tab 2 → thứ tự đảo đúng.
