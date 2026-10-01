@@ -1,6 +1,6 @@
 //! History and ref readers.
 //!
-//! Topology comes from `rev-list --topo-order --parents` on pinned tips;
+//! Topology comes from `rev-list --date-order --parents` on pinned tips;
 //! metadata from a length-framed `cat-file --batch` parse (never a separator
 //! that can appear inside a message). Ref names cannot contain ASCII control
 //! characters per `git check-ref-format`, so line splitting is safe there.
@@ -140,9 +140,10 @@ pub const MAX_TOPO_ROWS: usize = 20_000;
 /// are split transparently.
 const METADATA_BATCH: usize = 2_000;
 
-/// Full topo-ordered topology for pinned tips. Children before parents;
-/// timestamps never substitute topology. Returns the rows plus whether
-/// the walk was cut at [`MAX_TOPO_ROWS`] (oldest commits omitted).
+/// Date-ordered topology for pinned tips. Newer committer dates first,
+/// with children always before parents even when clocks disagree.
+/// Returns the rows plus whether the walk was cut at [`MAX_TOPO_ROWS`]
+/// (oldest commits omitted).
 pub async fn read_topology(
     runner: &GitRunner,
     session: &RepoSession,
@@ -165,7 +166,7 @@ pub async fn read_topology_capped(
     let over = max_rows.saturating_add(1).to_string();
     let mut argv: Vec<&str> = vec![
         "rev-list",
-        "--topo-order",
+        "--date-order",
         "--parents",
         "--boundary",
         "--max-count",

@@ -16,7 +16,10 @@ use crate::domain::{
     RepoSnapshot, RepoState, RequestId, SkippedWorkspace, TrustState, WorkspacesRestoreResult,
     WorkspacesSaved,
 };
-use crate::git::{discover, validate_branch_name, DiscoveredRepo, GitRunner, READ_TIMEOUT};
+use crate::git::{
+    discover, validate_branch_name, validate_remote_url, DiscoveredRepo, GitRunner, RemoteKind,
+    RunError, UrlError, NETWORK_TIMEOUT, READ_TIMEOUT,
+};
 use crate::persistence::Store;
 use crate::services::{RepoRegistry, RepoSession};
 
@@ -312,6 +315,97 @@ async fn core_init(
     build_snapshot(runner, registry, &session).await
 }
 
+async fn core_clone(
+    runner: &GitRunner,
+    registry: &mut RepoRegistry,
+    store: &mut Store,
+    source_url: &str,
+    selected: &Path,
+) -> Result<RepoSnapshot, AppError> {
+    let url = source_url.trim();
+    let kind = validate_remote_url(url).map_err(|rejection| match rejection {
+        UrlError::Rejected(reason) => bad_request(reason),
+    })?;
+    let parent = selected.parent().unwrap_or_else(|| Path::new("/"));
+    let target = selected
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !n.is_empty())
+        .ok_or_else(|| bad_request("Destination folder name is invalid"))?;
+    let existed = selected.exists();
+    if existed {
+        if !selected.is_dir() {
+            return Err(bad_request("Destination is not a folder"));
+        }
+        let mut entries = std::fs::read_dir(selected).map_err(|_| {
+            AppError::new(
+                ErrorCode::PATH_INVALID,
+                "Destination folder cannot be read",
+                RecoveryAction::ChooseRepository,
+                false,
+            )
+        })?;
+        if entries.next().is_some() {
+            return Err(bad_request(
+                "Destination folder is not empty; choose an empty folder",
+            ));
+        }
+    } else if !parent.exists() {
+        std::fs::create_dir_all(parent).map_err(|_| {
+            AppError::new(
+                ErrorCode::PATH_INVALID,
+                "Destination folder cannot be created",
+                RecoveryAction::ChooseRepository,
+                false,
+            )
+        })?;
+    }
+    // Fixed argv through the Git runner: prompts are disabled and the network
+    // bound applies, so a hanging remote fails instead of stalling forever.
+    let out = runner
+        .run(parent, &["clone", url, &target], NETWORK_TIMEOUT)
+        .await;
+    if out.is_err() && !existed && selected.exists() {
+        let _ = std::fs::remove_dir_all(selected);
+    }
+    let out = out.map_err(|err| match err {
+        RunError::TimedOut => AppError::new(
+            ErrorCode::TIMEOUT,
+            "Clone timed out; check the connection and retry",
+            RecoveryAction::RetryRead,
+            true,
+        ),
+        _ => AppError::new(
+            ErrorCode::GIT_ERROR,
+            "Git clone failed to start",
+            RecoveryAction::ConfigureGit,
+            false,
+        ),
+    })?;
+    if !out.success {
+        if !existed && selected.exists() {
+            let _ = std::fs::remove_dir_all(selected);
+        }
+        if kind == RemoteKind::Local {
+            return Err(AppError::new(
+                ErrorCode::GIT_ERROR,
+                "Clone failed; verify the source folder is a Git repository",
+                RecoveryAction::ChooseRepository,
+                false,
+            ));
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(super::sync::network_error(&stderr));
+    }
+    let discovered = discover(runner, selected).await?;
+    // Clone is explicit user intent, so it starts trusted (like init).
+    let session = registry.open(&discovered, TrustState::Trusted);
+    let key = session.key();
+    store.set_trusted(&key, true);
+    store.push_recent(&session.workspace_key(), &session.display_path);
+    build_snapshot(runner, registry, &session).await
+}
+
 async fn core_snapshot(
     runner: &GitRunner,
     registry: &mut RepoRegistry,
@@ -377,6 +471,14 @@ pub struct RepoInitRequest {
     pub request_id: RequestId,
     pub selected_path: String,
     pub initial_branch: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoCloneRequest {
+    pub request_id: RequestId,
+    pub source_url: String,
+    pub selected_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -536,6 +638,34 @@ pub async fn repo_init(
             &mut store,
             Path::new(&request.selected_path),
             &request.initial_branch,
+        )
+        .await
+    }
+    .await;
+    Ok(match result {
+        Ok(snapshot) => ApiResult::ok(snapshot, request_id),
+        Err(error) => ApiResult::err(error, request_id),
+    })
+}
+
+#[tauri::command]
+pub async fn repo_clone(
+    app: AppHandle,
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: RepoCloneRequest,
+) -> Result<ApiResult<RepoSnapshot>, String> {
+    let request_id = request.request_id.clone();
+    let result = async {
+        check_request_id(&request_id)?;
+        let runner = git_runner()?;
+        let mut registry = registry.lock().await;
+        let mut store = store_for(&app)?;
+        core_clone(
+            &runner,
+            &mut registry,
+            &mut store,
+            &request.source_url,
+            Path::new(&request.selected_path),
         )
         .await
     }
@@ -751,8 +881,8 @@ async fn core_workspaces_restore(
 
 pub mod prelude {
     pub use super::{
-        repo_close, repo_init, repo_open, repo_recent_list, repo_recent_remove, repo_snapshot,
-        repo_trust_set, workspaces_restore, workspaces_save,
+        repo_clone, repo_close, repo_init, repo_open, repo_recent_list, repo_recent_remove,
+        repo_snapshot, repo_trust_set, workspaces_restore, workspaces_save,
     };
 }
 
@@ -1195,5 +1325,106 @@ mod tests {
         assert!(decode_workspace_key("worktree-v1:2f746d70").is_ok());
         assert!(decode_workspace_key("/etc/passwd").is_err());
         assert!(decode_workspace_key("worktree-v1:zz").is_err());
+    }
+
+    #[tokio::test]
+    async fn clone_local_source_opens_trusted_session() {
+        let (runner, mut registry, mut store, root) = harness();
+        let source = root.join("source");
+        git(&root, &["init", "-b", "main", "source"]);
+        commit_file(&source, "a.txt");
+        let dest = root.join("cloned");
+
+        let snapshot = core_clone(
+            &runner,
+            &mut registry,
+            &mut store,
+            &source.to_string_lossy(),
+            &dest,
+        )
+        .await
+        .expect("clone");
+        assert!(matches!(snapshot.trust, TrustState::Trusted));
+        assert!(matches!(
+            snapshot.head,
+            HeadState::Branch { ref name, .. } if name == "main"
+        ));
+        assert!(dest.join(".git").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(dest.join("a.txt")).expect("cloned file"),
+            "content\n"
+        );
+        let session = registry.get(&snapshot.repo_id).expect("session");
+        assert!(store.is_trusted(&session.key()));
+    }
+
+    #[tokio::test]
+    async fn clone_refuses_bad_inputs_and_cleans_up() {
+        let (runner, mut registry, mut store, root) = harness();
+        let source = root.join("source");
+        git(&root, &["init", "-b", "main", "source"]);
+        commit_file(&source, "a.txt");
+        let source_url = source.to_string_lossy().into_owned();
+
+        let busy = root.join("busy");
+        std::fs::create_dir_all(&busy).expect("mkdir");
+        std::fs::write(busy.join("keep.txt"), "mine\n").expect("write");
+        let err = core_clone(&runner, &mut registry, &mut store, &source_url, &busy)
+            .await
+            .expect_err("non-empty destination refused");
+        assert_eq!(err.code, ErrorCode::INVALID_ARGUMENT);
+        assert!(busy.join("keep.txt").is_file(), "user files stay intact");
+
+        let file_dest = root.join("file");
+        std::fs::write(&file_dest, "x\n").expect("write");
+        let err = core_clone(&runner, &mut registry, &mut store, &source_url, &file_dest)
+            .await
+            .expect_err("file destination refused");
+        assert_eq!(err.code, ErrorCode::INVALID_ARGUMENT);
+
+        for bad_url in [
+            "",
+            "ext::sh -c echo",
+            "ftp://host/repo.git",
+            "https://user:pass@host/repo.git",
+        ] {
+            let err = core_clone(
+                &runner,
+                &mut registry,
+                &mut store,
+                bad_url,
+                &root.join("never"),
+            )
+            .await
+            .expect_err("bad URL refused");
+            assert_eq!(err.code, ErrorCode::INVALID_ARGUMENT, "{bad_url}");
+        }
+        assert!(!root.join("never").exists());
+
+        // A missing local source fails after git runs and removes the dir it made.
+        let failed = root.join("failed");
+        let err = core_clone(
+            &runner,
+            &mut registry,
+            &mut store,
+            &root.join("missing").to_string_lossy(),
+            &failed,
+        )
+        .await
+        .expect_err("missing source fails");
+        assert_eq!(err.code, ErrorCode::GIT_ERROR);
+        assert!(!failed.exists(), "partial clone is removed");
+    }
+
+    #[test]
+    fn clone_request_contract_matches_typescript() {
+        let request: RepoCloneRequest = serde_json::from_value(serde_json::json!({
+            "requestId": "r1",
+            "sourceUrl": "https://example.com/repo.git",
+            "selectedPath": "/tmp/repo"
+        }))
+        .expect("deserialize");
+        assert_eq!(request.source_url, "https://example.com/repo.git");
+        assert_eq!(request.selected_path, "/tmp/repo");
     }
 }

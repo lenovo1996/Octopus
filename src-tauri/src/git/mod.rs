@@ -22,8 +22,8 @@ pub use history::{
     CommitMeta, TopoRow, MAX_TOPO_ROWS,
 };
 pub use remote::{
-    ahead_behind, classify_network_stderr, parse_progress_line, redact_url, resolve_upstream,
-    validate_remote_url, NetworkFault, RemoteKind, UpstreamRef, UrlError,
+    ahead_behind, classify_network_stderr, is_push_rejected, parse_progress_line, redact_url,
+    resolve_upstream, validate_remote_url, NetworkFault, RemoteKind, UpstreamRef, UrlError,
 };
 pub use runner::{GitRunner, RunError, NETWORK_TIMEOUT, READ_TIMEOUT, WRITE_TIMEOUT};
 pub use status::{

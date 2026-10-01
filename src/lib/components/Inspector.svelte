@@ -9,6 +9,7 @@
     CommitDetails,
     ConflictFile,
     ConflictPreview,
+    ResolvedConflictFile,
     RefItem,
     DiffTarget
   } from "../ipc/types";
@@ -62,6 +63,9 @@
     /** T13 conflict inspector: live unmerged state, null until loaded. */
     mergeBanner: string | null;
     conflictFiles: ConflictFile[] | null;
+    conflictResolvedFiles: ResolvedConflictFile[];
+    conflictCurrentLabel: string;
+    conflictIncomingLabel: string;
     conflictFilesLoading: boolean;
     conflictFilesError: AppError | null;
     conflictSelected: string | null;
@@ -72,6 +76,7 @@
     conflictActionError: AppError | null;
     conflictNotice: string | null;
     mergeSubject: string;
+    mergeBody: string;
     reviewedStaged: boolean;
     canComplete: boolean;
     canAbort: boolean;
@@ -80,12 +85,15 @@
     acceptConfirm: { side: string; summary: string; token: string } | null;
     onSelectConflict: (pathId: string) => void;
     onReloadConflicts: () => void;
+    onSelectResolvedConflict: (displayPath: string) => void;
+    onMarkAllResolved: () => void;
     onAskAccept: (side: string) => void;
     onConfirmAccept: () => void;
     onCancelAccept: () => void;
     onMarkWorking: () => void;
     onMarkDeletion: () => void;
     onMergeSubject: (value: string) => void;
+    onMergeBody: (value: string) => void;
     onCompleteMerge: () => void;
     onAskAbort: () => void;
     onConfirmAbort: () => void;
@@ -134,6 +142,9 @@
     onRetryDetails,
     mergeBanner,
     conflictFiles,
+    conflictResolvedFiles,
+    conflictCurrentLabel,
+    conflictIncomingLabel,
     conflictFilesLoading,
     conflictFilesError,
     conflictSelected,
@@ -142,8 +153,8 @@
     conflictPreviewError,
     conflictBusy,
     conflictActionError,
-    conflictNotice,
     mergeSubject,
+    mergeBody,
     reviewedStaged,
     canComplete,
     canAbort,
@@ -152,12 +163,15 @@
     acceptConfirm,
     onSelectConflict,
     onReloadConflicts,
+    onSelectResolvedConflict,
+    onMarkAllResolved,
     onAskAccept,
     onConfirmAccept,
     onCancelAccept,
     onMarkWorking,
     onMarkDeletion,
     onMergeSubject,
+    onMergeBody,
     onCompleteMerge,
     onAskAbort,
     onConfirmAbort,
@@ -183,6 +197,9 @@
     <ConflictPanel
       {mergeBanner}
       files={conflictFiles ?? []}
+      resolvedFiles={conflictResolvedFiles}
+      currentLabel={conflictCurrentLabel}
+      incomingLabel={conflictIncomingLabel}
       filesLoading={conflictFilesLoading}
       filesError={conflictFilesError}
       selectedPathId={conflictSelected}
@@ -191,8 +208,9 @@
       previewError={conflictPreviewError}
       busy={conflictBusy}
       actionError={conflictActionError}
-      notice={conflictNotice}
+      notice={""}
       {mergeSubject}
+      {mergeBody}
       {reviewedStaged}
       {canComplete}
       {canAbort}
@@ -202,12 +220,15 @@
       {trustBlocked}
       onSelectFile={onSelectConflict}
       onReload={onReloadConflicts}
+      onSelectResolved={onSelectResolvedConflict}
+      onMarkAll={onMarkAllResolved}
       {onAskAccept}
       {onConfirmAccept}
       {onCancelAccept}
       {onMarkWorking}
       {onMarkDeletion}
       {onMergeSubject}
+      {onMergeBody}
       onComplete={onCompleteMerge}
       {onAskAbort}
       {onConfirmAbort}
@@ -226,31 +247,5 @@
     border-left: 1px solid var(--gd-border);
     min-height: 0;
     min-width: 0;
-  }
-  .gd-inspector-tabs {
-    display: flex;
-    gap: 12px;
-    padding: 0 16px;
-    border-bottom: 1px solid var(--gd-border);
-    flex: 0 0 auto;
-  }
-  .gd-inspector-tabs button {
-    flex: 1;
-    padding: 13px 0;
-    color: var(--gd-text-secondary);
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 0;
-    cursor: pointer;
-    font-size: var(--gd-font-size-small);
-  }
-  .gd-inspector-tabs button.active {
-    color: var(--gd-text);
-    background: transparent;
-    border-bottom-color: var(--gd-accent);
-    color: var(--gd-accent);
-  }
-  .gd-inspector-tabs button:focus-visible {
-    outline: 2px solid var(--gd-focus);
   }
 </style>

@@ -11,8 +11,8 @@ use tauri::State;
 use tokio::sync::Mutex;
 
 use crate::domain::{
-    ApiResult, AppError, BranchCreateResult, ConfirmationDetails, ErrorCode, RecoveryAction,
-    RefItem, RepoSnapshot, RequestId, TrustState,
+    ApiResult, AppError, BranchCompareResult, BranchCreateResult, ConfirmationDetails, ErrorCode,
+    RecoveryAction, RefItem, RepoSnapshot, RequestId, TrustState,
 };
 use crate::git::{
     list_refs, read_status, validate_branch_name, GitRunner, NETWORK_TIMEOUT, READ_TIMEOUT,
@@ -321,6 +321,52 @@ async fn core_branch_switch(
     fresh_snapshot(runner, registry, repo_id).await
 }
 
+// ---- compare ----
+
+/// Read-only ahead/behind of a local branch vs a remote branch. Both ids
+/// must name known refs of the expected kind; the rev-list endpoints come
+/// from the validated listing, never from raw input. No trust or version
+/// gate: callers revalidate before any mutation built on these counts.
+async fn core_branch_compare(
+    runner: &GitRunner,
+    registry: &mut RepoRegistry,
+    repo_id: &str,
+    local_ref_id: &str,
+    remote_ref_id: &str,
+) -> Result<BranchCompareResult, AppError> {
+    let session = registry.get(repo_id).ok_or_else(session_missing)?.clone();
+    let refs = list_refs(runner, &session).await?;
+    let local = find_ref(&refs, local_ref_id)?;
+    let remote = find_ref(&refs, remote_ref_id)?;
+    if local.kind != "local" {
+        return Err(bad_request("Compare target must be a local branch"));
+    }
+    if remote.kind != "remote" {
+        return Err(bad_request("Compare base must be a remote branch"));
+    }
+    let out = runner
+        .run(
+            &session.worktree_root,
+            &[
+                "rev-list",
+                "--left-right",
+                "--count",
+                &format!("{}...{}", remote.full_name, local.full_name),
+            ],
+            READ_TIMEOUT,
+        )
+        .await
+        .map_err(|_| git_failed("compare branches"))?;
+    if !out.success {
+        return Err(git_failed("compare branches"));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut parts = text.split_whitespace();
+    let behind: u64 = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+    let ahead: u64 = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+    Ok(BranchCompareResult { ahead, behind })
+}
+
 // ---- delete + confirmations ----
 
 async fn core_confirmation_prepare(
@@ -342,7 +388,13 @@ async fn core_confirmation_prepare(
     if session.version != expected_version {
         return Err(stale_state());
     }
-    if action == "discard_file" || action == "discard_hunk" {
+    if action == "discard_file"
+        || action == "discard_hunk"
+        || action == "history_reset_hard"
+        || action == "history_rebase"
+        || action == "history_rebase_interactive"
+        || action == "history_split"
+    {
         return super::stage::prepare_discard_confirmation(
             runner,
             registry,
@@ -799,7 +851,7 @@ fn push_terminal_error(stderr: &str) -> AppError {
             true,
         );
     }
-    if lower.contains("non-fast-forward") || lower.contains("fetch first") {
+    if crate::git::is_push_rejected(&lower) {
         return AppError::new(
             ErrorCode::DIVERGED,
             "The remote branch moved ahead; fetch and merge before pushing",
@@ -831,6 +883,15 @@ pub struct BranchSwitchRequest {
     pub expected_version: u64,
     pub ref_id: String,
     pub new_local_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchCompareRequest {
+    pub request_id: RequestId,
+    pub repo_id: String,
+    pub local_ref_id: String,
+    pub remote_ref_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -943,6 +1004,32 @@ pub async fn branch_switch(
             request.expected_version,
             &request.ref_id,
             request.new_local_name.as_deref(),
+        )
+        .await
+    }
+    .await;
+    Ok(match result {
+        Ok(data) => ApiResult::ok(data, request_id),
+        Err(error) => ApiResult::err(error, request_id),
+    })
+}
+
+#[tauri::command]
+pub async fn branch_compare(
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: BranchCompareRequest,
+) -> Result<ApiResult<BranchCompareResult>, String> {
+    let request_id = request.request_id.clone();
+    let result = async {
+        check_request_id(&request_id)?;
+        let runner = git_runner()?;
+        let mut registry = registry.lock().await;
+        core_branch_compare(
+            &runner,
+            &mut registry,
+            &request.repo_id,
+            &request.local_ref_id,
+            &request.remote_ref_id,
         )
         .await
     }
@@ -1117,10 +1204,11 @@ pub async fn confirmation_prepare(
 
 pub mod prelude {
     pub use super::{
-        branch_create, branch_delete, branch_move, branch_push, branch_rename, branch_set_upstream,
-        branch_switch, confirmation_prepare, BranchCreateRequest, BranchDeleteRequest,
-        BranchMoveRequest, BranchPushRequest, BranchRenameRequest, BranchSetUpstreamRequest,
-        BranchSwitchRequest, ConfirmationPrepareRequest,
+        branch_compare, branch_create, branch_delete, branch_move, branch_push, branch_rename,
+        branch_set_upstream, branch_switch, confirmation_prepare, BranchCompareRequest,
+        BranchCreateRequest, BranchDeleteRequest, BranchMoveRequest, BranchPushRequest,
+        BranchRenameRequest, BranchSetUpstreamRequest, BranchSwitchRequest,
+        ConfirmationPrepareRequest,
     };
 }
 
@@ -1694,5 +1782,162 @@ mod tests {
             .output()
             .expect("verify");
         assert!(out.status.success());
+    }
+
+    async fn compare_fixture(label: &str) -> (std::path::PathBuf, GitRunner, RepoRegistry, String) {
+        let (_dir, repo) = temp_repo(label);
+        git(&repo, &["commit", "--allow-empty", "-m", "base"]);
+        let runner = git_runner().expect("system git");
+        let mut registry = RepoRegistry::default();
+        let repo_id = open_repo(&mut registry, &repo, TrustState::Trusted);
+        (repo, runner, registry, repo_id)
+    }
+
+    fn set_remote(repo: &std::path::Path, rev: &str) {
+        let oid = oid_of(repo, rev);
+        git(repo, &["update-ref", "refs/remotes/origin/dev", &oid]);
+    }
+
+    #[tokio::test]
+    async fn compare_counts_ahead_behind_and_equal() {
+        let (repo, runner, mut registry, repo_id) = compare_fixture("compare-counts").await;
+        git(&repo, &["checkout", "-b", "dev"]);
+        git(&repo, &["commit", "--allow-empty", "-m", "local-1"]);
+        git(&repo, &["commit", "--allow-empty", "-m", "local-2"]);
+        set_remote(&repo, "main");
+
+        // Local-only commits: ahead 2, behind 0.
+        let counts = core_branch_compare(
+            &runner,
+            &mut registry,
+            &repo_id,
+            "refs/heads/dev",
+            "refs/remotes/origin/dev",
+        )
+        .await
+        .expect("compare");
+        assert_eq!((counts.ahead, counts.behind), (2, 0));
+
+        // Aligned tips: nothing on either side.
+        set_remote(&repo, "dev");
+        let counts = core_branch_compare(
+            &runner,
+            &mut registry,
+            &repo_id,
+            "refs/heads/dev",
+            "refs/remotes/origin/dev",
+        )
+        .await
+        .expect("compare equal");
+        assert_eq!((counts.ahead, counts.behind), (0, 0));
+
+        // Remote-only commit: behind 1.
+        git(&repo, &["checkout", "main"]);
+        git(&repo, &["commit", "--allow-empty", "-m", "remote-1"]);
+        set_remote(&repo, "main");
+        let counts = core_branch_compare(
+            &runner,
+            &mut registry,
+            &repo_id,
+            "refs/heads/dev",
+            "refs/remotes/origin/dev",
+        )
+        .await
+        .expect("compare diverged");
+        assert_eq!((counts.ahead, counts.behind), (2, 1));
+    }
+
+    #[tokio::test]
+    async fn compare_rejects_unknown_and_misplaced_refs() {
+        let (repo, runner, mut registry, repo_id) = compare_fixture("compare-invalid").await;
+        git(&repo, &["checkout", "-b", "dev"]);
+        set_remote(&repo, "dev");
+
+        let err = core_branch_compare(
+            &runner,
+            &mut registry,
+            &repo_id,
+            "refs/heads/missing",
+            "refs/remotes/origin/dev",
+        )
+        .await
+        .expect_err("unknown local ref");
+        assert_eq!(err.code, ErrorCode::REF_INVALID);
+
+        let err = core_branch_compare(
+            &runner,
+            &mut registry,
+            &repo_id,
+            "refs/remotes/origin/dev",
+            "refs/heads/dev",
+        )
+        .await
+        .expect_err("swapped kinds");
+        assert_eq!(err.code, ErrorCode::INVALID_ARGUMENT);
+    }
+
+    #[tokio::test]
+    async fn compare_contract_matches_typescript() {
+        let counts = BranchCompareResult {
+            ahead: 2,
+            behind: 1,
+        };
+        let json = serde_json::to_string(&counts).expect("serialize");
+        assert_eq!(json, r#"{"ahead":2,"behind":1}"#);
+    }
+
+    #[tokio::test]
+    async fn history_confirmations_prepare_through_shared_entry_point() {
+        let (_dir, repo) = temp_repo("branches-history-prepare");
+        git(&repo, &["config", "user.name", "T Ten"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        git(&repo, &["commit", "--allow-empty", "-m", "init"]);
+        git(&repo, &["commit", "--allow-empty", "-m", "second"]);
+
+        let runner = git_runner().expect("system git");
+        let mut registry = RepoRegistry::default();
+        let repo_id = open_repo(&mut registry, &repo, TrustState::Trusted);
+        let version = registry.get(&repo_id).expect("session").version;
+        let target = oid_of(&repo, "HEAD~1");
+        for action in [
+            "history_reset_hard",
+            "history_rebase",
+            "history_rebase_interactive",
+            "history_split",
+        ] {
+            let details = core_confirmation_prepare(
+                &runner,
+                &mut registry,
+                &repo_id,
+                version,
+                action,
+                std::slice::from_ref(&target),
+            )
+            .await
+            .expect("history prepare must be supported");
+            assert!(!details.confirmation_token.is_empty(), "{action}");
+            assert!(!details.summary.is_empty(), "{action}");
+        }
+        // The reset token must unlock the hard-reset flow for the same target.
+        let details = core_confirmation_prepare(
+            &runner,
+            &mut registry,
+            &repo_id,
+            version,
+            "history_reset_hard",
+            std::slice::from_ref(&target),
+        )
+        .await
+        .expect("reset prepare");
+        assert!(details.summary.contains("Hard-reset"));
+        registry
+            .confirmation_consume(
+                &repo_id,
+                version,
+                "history_reset_hard",
+                &[target],
+                &details.confirmation_token,
+            )
+            .expect("reset token consumes");
     }
 }

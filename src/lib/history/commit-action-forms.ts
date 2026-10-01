@@ -197,3 +197,49 @@ export function validateCommitForm(
   }
   return null;
 }
+
+/** Success-toast copy for a submitted history action. */
+export function historyActionToast(
+  action: CommitActionId,
+  oid: string,
+  values: Record<string, string>,
+  planCount: number
+): string {
+  const short = oid.slice(0, 7);
+  switch (action) {
+    case "checkout":
+      return `Checked out ${short}`;
+    case "create-tag":
+      return `Created tag ${(values.name ?? "").trim()}`;
+    case "push-to":
+      return `Pushed ${short} to ${(values.remote ?? "").trim()}/${(values.destBranch ?? "").trim()}`;
+    case "cherry-pick":
+      return `Cherry-picked ${short}`;
+    case "revert":
+      return `Reverted ${short}`;
+    case "merge":
+      return `Merged ${short}`;
+    case "rebase":
+      return `Rebased onto ${short}`;
+    case "reword":
+      return `Reworded ${short}`;
+    case "modify":
+      return `Modified ${short}`;
+    case "edit-author":
+      return `Updated author of ${short}`;
+    case "split":
+      return `Split ${short}`;
+    case "move-to-branch":
+      return `Moved ${short} to ${(values.name ?? "").trim()}`;
+    case "interactive-rebase":
+      return planCount === 1 ? "Rebased 1 commit" : `Rebased ${planCount} commits`;
+    case "reset-soft":
+      return `Soft reset to ${short}`;
+    case "reset-mixed":
+      return `Mixed reset to ${short}`;
+    case "reset-hard":
+      return `Hard reset to ${short}`;
+    default:
+      return "History action completed";
+  }
+}

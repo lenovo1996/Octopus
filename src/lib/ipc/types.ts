@@ -348,8 +348,17 @@ export interface ConflictFile {
   supportReason: string | null;
 }
 
+export interface ResolvedConflictFile {
+  displayPath: string;
+  originalPath: string | null;
+  status: string;
+}
+
 export interface ConflictList {
   files: ConflictFile[];
+  resolvedFiles: ResolvedConflictFile[];
+  currentLabel: string;
+  incomingLabel: string;
   canComplete: boolean;
   canAbort: boolean;
   abortReason: string | null;
@@ -472,6 +481,13 @@ export interface ConfirmationDetails {
   confirmationToken: string;
   summary: string;
   expiresAt: number;
+}
+
+export interface BranchCompareResult {
+  /** Commits on the local branch missing from the remote. */
+  ahead: number;
+  /** Commits on the remote branch missing locally. */
+  behind: number;
 }
 
 export interface OpenWorkspaceEntry {

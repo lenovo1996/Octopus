@@ -323,6 +323,18 @@ pub fn classify_network_stderr(stderr: &str) -> NetworkFault {
     }
 }
 
+/// True when git stderr reports a rejected push: non-fast-forward, a stale
+/// force-with-lease, or "fetch first" advice. Fetch/pull/clone failures never
+/// emit these markers, so the shared remote-job classifier can use this for
+/// every job kind without misreading transport faults.
+pub fn is_push_rejected(stderr: &str) -> bool {
+    let text = stderr.to_lowercase();
+    text.contains("non-fast-forward")
+        || text.contains("fetch first")
+        || text.contains("failed to push some refs")
+        || text.contains("[rejected]")
+}
+
 /// Parse a `--progress` sideband line into a 0..=100 percentage.
 /// Handles `Receiving objects: 45% (13/28)`, `Resolving deltas: 100%`, etc.
 pub fn parse_progress_line(line: &str) -> Option<u32> {

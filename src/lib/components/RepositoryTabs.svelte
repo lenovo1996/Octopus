@@ -91,7 +91,7 @@
 
 <nav class="gd-repositories" aria-label="Repository workspace">
   <span class="gd-brand" title="Open repositories"><img src="/brand/octopus-128.png" alt="" width="28" height="28" />Octopus<span>{tabs.length}</span></span>
-  <div class="gd-tabs" role="tablist" aria-label="Open repositories" bind:this={list}
+  <div tabindex="0" class="gd-tabs" role="tablist" aria-label="Open repositories" bind:this={list}
     ondragover={(event) => { if (dragId) event.preventDefault(); }}
     ondrop={(event) => { event.preventDefault(); dragEnd(); }}>
     {#each tabs as tab (tab.snapshot.repoId)}

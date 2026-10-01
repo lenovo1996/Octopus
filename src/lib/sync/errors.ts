@@ -44,3 +44,36 @@ export function syncFailureMessage(
 export function asSyncKind(value: string): SyncKind | null {
   return value === "fetch" || value === "pull" || value === "push" ? value : null;
 }
+
+/**
+ * A rejected push (remote tip differs, e.g. after an amend) parks the
+ * push-recovery bar with force / pull-and-push / cancel instead of the
+ * plain toolbar error. Other kinds and codes keep the existing display.
+ */
+export function shouldOfferPushRecovery(
+  kind: string | null | undefined,
+  code: string | null | undefined
+): boolean {
+  return kind === "push" && code === "DIVERGED";
+}
+
+/** Toast copy for a sync job start. */
+export function syncStartMessage(kind: SyncKind, force: boolean): string {
+  if (kind === "fetch") return "Fetching…";
+  if (kind === "pull") return "Pulling…";
+  return force ? "Force pushing…" : "Pushing…";
+}
+
+/** Toast copy for a finished sync job. */
+export function syncDoneMessage(kind: string, forced: boolean): string {
+  if (kind === "fetch") return "Fetched";
+  if (kind === "pull") return "Pulled";
+  return forced ? "Force pushed" : "Pushed";
+}
+
+/** Toast copy for a user-cancelled sync job. */
+export function syncCancelMessage(kind: string): string {
+  if (kind === "fetch") return "Fetch cancelled";
+  if (kind === "pull") return "Pull cancelled";
+  return "Push cancelled";
+}

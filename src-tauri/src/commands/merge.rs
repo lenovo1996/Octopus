@@ -1,6 +1,6 @@
 //! `merge_start` / `merge_complete` / `merge_abort` plus the conflict
 //! inspector (`conflict_list`, `conflict_preview`, `conflict_accept`,
-//! `conflict_mark_resolved`) — T13 — and the merge editor
+//! `conflict_mark_resolved`, `conflict_mark_all_resolved`) — T13 — and the merge editor
 //! (`conflict_hunks`, `conflict_merge`), which resolves text conflicts
 //! per block or per line from working-file markers.
 //!
@@ -28,6 +28,7 @@
 //!   have two parents.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use tauri::State;
@@ -51,6 +52,8 @@ const MERGE_CAP_BYTES: usize = 256 * 1024;
 /// so legitimate output stays near input size.
 const MERGE_OUTPUT_CAP_BYTES: usize = 4 * 1024 * 1024;
 const MAX_MERGE_PICKS: usize = 200_000;
+const MAX_BULK_RESOLVE_PATHS: usize = 5_000;
+const MAX_BULK_RESOLVE_BYTES: usize = 512 * 1024;
 
 fn bad_request(message: impl Into<String>) -> AppError {
     AppError::new(
@@ -156,8 +159,20 @@ pub struct ConflictFile {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ResolvedConflictFile {
+    pub display_path: String,
+    pub original_path: Option<String>,
+    /// First `git diff --name-status` status letter: M/A/D/R/C/T.
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConflictList {
     pub files: Vec<ConflictFile>,
+    pub resolved_files: Vec<ResolvedConflictFile>,
+    pub current_label: String,
+    pub incoming_label: String,
     pub can_complete: bool,
     pub can_abort: bool,
     pub abort_reason: Option<String>,
@@ -396,6 +411,70 @@ async fn read_unmerged(
     Ok(entries)
 }
 
+/// Stage-0 paths already included in the pending merge result. App-started
+/// merges begin from a clean index, so `HEAD..index` is the resolved-file
+/// list users expect. Unmerged entries are filtered defensively.
+async fn read_resolved_merge_files(
+    runner: &GitRunner,
+    session: &RepoSession,
+    unmerged: &[UnmergedEntry],
+) -> Result<Vec<ResolvedConflictFile>, AppError> {
+    let out = run_git(
+        runner,
+        &session.worktree_root,
+        &[
+            "-c".to_string(),
+            "core.quotepath=off".to_string(),
+            "diff".to_string(),
+            "--cached".to_string(),
+            "--name-status".to_string(),
+            "-z".to_string(),
+            "--find-renames".to_string(),
+            "HEAD".to_string(),
+            "--".to_string(),
+        ],
+        READ_TIMEOUT,
+    )
+    .await?;
+    if !out.success {
+        return Err(git_failed());
+    }
+
+    let blocked: HashSet<&[u8]> = unmerged.iter().map(|entry| entry.path.as_slice()).collect();
+    let fields: Vec<&[u8]> = out
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .collect();
+    let mut files = Vec::new();
+    let mut index = 0;
+    while index < fields.len() {
+        let raw_status = fields[index];
+        index += 1;
+        let status = raw_status.first().copied().ok_or_else(git_failed)?;
+        let renamed = status == b'R' || status == b'C';
+        let original = if renamed {
+            let path = fields.get(index).copied().ok_or_else(git_failed)?;
+            index += 1;
+            Some(path)
+        } else {
+            None
+        };
+        let path = fields.get(index).copied().ok_or_else(git_failed)?;
+        index += 1;
+        if status == b'U' || blocked.contains(path) {
+            continue;
+        }
+        files.push(ResolvedConflictFile {
+            display_path: String::from_utf8_lossy(path).into_owned(),
+            original_path: original.map(|value| String::from_utf8_lossy(value).into_owned()),
+            status: char::from(status).to_string(),
+        });
+    }
+    files.sort_by(|a, b| a.display_path.cmp(&b.display_path));
+    Ok(files)
+}
+
 /// Blob bytes of one surviving stage (`:[stage]:path`, byte-exact).
 async fn stage_bytes(
     runner: &GitRunner,
@@ -585,6 +664,16 @@ async fn core_list(
             support_reason: if supported { None } else { Some(reason) },
         });
     }
+    let resolved_files = if live_merge {
+        read_resolved_merge_files(runner, &session, &entries).await?
+    } else {
+        Vec::new()
+    };
+    let (current_label, incoming_label) = if live_merge {
+        side_labels(registry, repo_id, &session.display_name)
+    } else {
+        (String::new(), String::new())
+    };
     let record = registry.merge_get(repo_id).cloned();
     let can_complete = live_merge && entries.is_empty();
     let (can_abort, abort_reason) = match (&record, live_merge) {
@@ -604,6 +693,9 @@ async fn core_list(
     };
     Ok(ConflictList {
         files,
+        resolved_files,
+        current_label,
+        incoming_label,
         can_complete,
         can_abort,
         abort_reason,
@@ -1485,6 +1577,61 @@ async fn core_mark_resolved(
     fresh_snapshot(runner, registry, repo_id).await
 }
 
+/// Stage every currently unmerged path exactly once. All targets are checked
+/// before the single Git mutation so a symlink, submodule, or unusual path
+/// cannot leave a half-resolved index.
+async fn core_mark_all_resolved(
+    runner: &GitRunner,
+    registry: &mut RepoRegistry,
+    repo_id: &str,
+    expected_version: u64,
+) -> Result<RepoSnapshot, AppError> {
+    let session = check_write_context(registry, repo_id, expected_version, "resolve conflicts")?;
+    let queue = registry.queue_for(&session.key());
+    let _guard = queue.lock().await;
+    let entries = read_unmerged(runner, &session).await?;
+    if entries.is_empty() {
+        return Err(bad_request("There are no unresolved conflicts to mark"));
+    }
+    if entries.len() > MAX_BULK_RESOLVE_PATHS
+        || entries.iter().map(|entry| entry.path.len()).sum::<usize>() > MAX_BULK_RESOLVE_BYTES
+    {
+        return Err(bad_request(
+            "Too many conflict paths to mark in one operation; resolve them in smaller groups",
+        ));
+    }
+
+    for entry in &entries {
+        let target = worktree_path(&session, &entry.path)?;
+        match std::fs::symlink_metadata(&target) {
+            Ok(meta) if meta.is_file() => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => {
+                return Err(bad_request(
+                    "Mark all supports regular files and confirmed deletions only; resolve symlink and submodule conflicts individually",
+                ))
+            }
+        }
+    }
+
+    let mut argv = vec![
+        OsString::from("add"),
+        OsString::from("-A"),
+        OsString::from("--"),
+    ];
+    for entry in &entries {
+        let mut spec = OsString::from(":(literal)");
+        spec.push(OsStr::from_bytes(&entry.path));
+        argv.push(spec);
+    }
+    let out = run_git_os(runner, &session.worktree_root, &argv, WRITE_TIMEOUT).await?;
+    if !out.success {
+        let _ = fresh_snapshot(runner, registry, repo_id).await;
+        return Err(git_failed());
+    }
+    fresh_snapshot(runner, registry, repo_id).await
+}
+
 /// Validate the merge source: a live ref (local, remote-tracking or tag)
 /// or a 40-hex commit OID. Returns the commit OID plus a UI label.
 async fn resolve_source(
@@ -1959,6 +2106,14 @@ pub struct ConflictResolveRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConflictResolveAllRequest {
+    pub request_id: RequestId,
+    pub repo_id: String,
+    pub expected_version: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConflictHunksRequest {
     pub request_id: RequestId,
     pub repo_id: String,
@@ -2081,6 +2236,31 @@ pub async fn conflict_mark_resolved(
             &request.path_id,
             &request.working_fingerprint,
             request.resolution,
+        )
+        .await
+    }
+    .await;
+    Ok(match result {
+        Ok(data) => ApiResult::ok(data, request_id),
+        Err(error) => ApiResult::err(error, request_id),
+    })
+}
+
+#[tauri::command]
+pub async fn conflict_mark_all_resolved(
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: ConflictResolveAllRequest,
+) -> Result<ApiResult<RepoSnapshot>, String> {
+    let request_id = request.request_id.clone();
+    let result = async {
+        check_request_id(&request_id)?;
+        let runner = git_runner()?;
+        let mut registry = registry.lock().await;
+        core_mark_all_resolved(
+            &runner,
+            &mut registry,
+            &request.repo_id,
+            request.expected_version,
         )
         .await
     }
@@ -2223,12 +2403,13 @@ pub async fn merge_abort(
 pub mod prelude {
     pub use super::{
         conflict_accept, conflict_auto_resolve, conflict_hunks, conflict_list,
-        conflict_mark_resolved, conflict_merge, conflict_preview, merge_abort, merge_complete,
-        merge_start, ConflictAcceptRequest, ConflictAcceptResult, ConflictFile, ConflictHunks,
-        ConflictHunksRequest, ConflictList, ConflictMergeRequest, ConflictMergeResult,
-        ConflictPreview, ConflictPreviewRequest, ConflictResolveRequest, MarkResolution,
-        MergeAbortRequest, MergeCompleteRequest, MergeCompleteResult, MergeContext,
-        MergeStartRequest, MergeStartResult, StagePreview,
+        conflict_mark_all_resolved, conflict_mark_resolved, conflict_merge, conflict_preview,
+        merge_abort, merge_complete, merge_start, ConflictAcceptRequest, ConflictAcceptResult,
+        ConflictFile, ConflictHunks, ConflictHunksRequest, ConflictList, ConflictMergeRequest,
+        ConflictMergeResult, ConflictPreview, ConflictPreviewRequest, ConflictResolveAllRequest,
+        ConflictResolveRequest, MarkResolution, MergeAbortRequest, MergeCompleteRequest,
+        MergeCompleteResult, MergeContext, MergeStartRequest, MergeStartResult,
+        ResolvedConflictFile, StagePreview,
     };
 }
 
@@ -4070,5 +4251,42 @@ mod tests {
         .await
         .expect_err("duplicate hunk");
         assert_eq!(err.code, ErrorCode::INVALID_ARGUMENT);
+    }
+
+    #[tokio::test]
+    async fn conflict_list_tracks_resolved_files_and_bulk_mark_stages_all() {
+        let (_dir, repo, runner, mut registry, repo_id, _file) = conflicted_repo(
+            "resolved-list",
+            format!("top\nA\nB\n{PAD}mid\nC\nD\nbottom\n"),
+        )
+        .await;
+        std::fs::write(repo.join("already-resolved.txt"), "resolved\n").expect("write");
+        git(&repo, &["add", "already-resolved.txt"]);
+
+        let listed = core_list(&runner, &mut registry, &repo_id)
+            .await
+            .expect("list");
+        assert_eq!(listed.current_label, "main");
+        assert_eq!(listed.incoming_label, "feature");
+        assert!(listed
+            .resolved_files
+            .iter()
+            .any(|file| file.display_path == "already-resolved.txt" && file.status == "A"));
+
+        let version = version_of(&registry, &repo_id);
+        let snapshot = core_mark_all_resolved(&runner, &mut registry, &repo_id, version)
+            .await
+            .expect("mark all resolved");
+        assert_eq!(snapshot.state, RepoState::Merging);
+
+        let relisted = core_list(&runner, &mut registry, &repo_id)
+            .await
+            .expect("relist");
+        assert!(relisted.files.is_empty());
+        assert!(relisted.can_complete);
+        assert!(relisted
+            .resolved_files
+            .iter()
+            .any(|file| file.display_path == "f.txt" && file.status == "M"));
     }
 }

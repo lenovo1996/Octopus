@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildBranchMenuItems, canCheckoutRef, defaultBranchTab, pullRequestTargetName, resolveCheckoutTarget, shouldPullAfterCheckout } from "../../src/lib/refs/branch-menu";
+import { buildBranchMenuItems, canCheckoutRef, defaultBranchTab, directMergeSubject, pullRequestTargetName, resolveCheckoutTarget, shouldAutoCompleteMerge, shouldConfirmResetBeforeCheckout, shouldPullAfterCheckout } from "../../src/lib/refs/branch-menu";
 import type { RefItem } from "../../src/lib/ipc/types";
 
 function ref(overrides: Partial<RefItem> = {}): RefItem {
@@ -151,6 +151,18 @@ describe("branch context menu", () => {
     }
   });
 
+  it("auto-completes only clean direct merges", () => {
+    expect(shouldAutoCompleteMerge(true, false, false)).toBe(true);
+    expect(shouldAutoCompleteMerge(true, true, false)).toBe(false);
+    expect(shouldAutoCompleteMerge(true, false, true)).toBe(false);
+    expect(shouldAutoCompleteMerge(false, false, false)).toBe(false);
+  });
+
+  it("builds the one-click merge subject within the backend cap", () => {
+    expect(directMergeSubject("main", "dev")).toBe("Merge main into dev");
+    expect(directMergeSubject("a".repeat(400), "b".repeat(400)).length).toBeLessThanOrEqual(500);
+  });
+
   it("double-click checks out branches but never tags", () => {
     expect(canCheckoutRef(ref())).toBe(true);
     expect(canCheckoutRef(ref({ kind: "remote" }))).toBe(true);
@@ -183,5 +195,20 @@ describe("branch context menu", () => {
   it("opens the Branches dialog on the create form only for create-here", () => {
     expect(defaultBranchTab(true)).toBe("create");
     expect(defaultBranchTab(false)).toBe("local");
+  });
+
+  it("confirms reset only when the trusted twin is ahead of its remote", () => {
+    const remote = ref({ kind: "remote", refId: "refs/remotes/origin/feature", fullName: "refs/remotes/origin/feature", label: "origin/feature" });
+    expect(shouldConfirmResetBeforeCheckout(remote, true, true, 2)).toBe(true);
+    expect(shouldConfirmResetBeforeCheckout(remote, true, true, 0)).toBe(false);
+    expect(shouldConfirmResetBeforeCheckout(remote, true, false, 2)).toBe(false);
+    expect(shouldConfirmResetBeforeCheckout(remote, false, true, 2)).toBe(false);
+    expect(shouldConfirmResetBeforeCheckout(ref(), true, true, 2)).toBe(false);
+    expect(shouldConfirmResetBeforeCheckout(ref({ kind: "tag" }), true, true, 2)).toBe(false);
+  });
+
+  it("never confirms reset for the remote HEAD symref", () => {
+    const head = ref({ kind: "remote", refId: "refs/remotes/origin/HEAD", fullName: "refs/remotes/origin/HEAD", label: "origin/HEAD" });
+    expect(shouldConfirmResetBeforeCheckout(head, true, true, 2)).toBe(false);
   });
 });

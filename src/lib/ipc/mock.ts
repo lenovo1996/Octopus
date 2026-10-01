@@ -6,6 +6,7 @@ import type {
   AppError,
   AppPreflightRequest,
   BitbucketConnectionResult,
+  BranchCompareResult,
   BranchCreateResult,
   ChangedFile,
   CommitDetails,
@@ -24,6 +25,7 @@ import type {
   ConflictList,
   ConflictMergeResult,
   ConflictPreview,
+  ResolvedConflictFile,
   MergeBlockPick,
   MergeSegment,
   MergeCompleteResult,
@@ -90,6 +92,14 @@ const mockAdapter = {
     await new Promise((resolve) => setTimeout(resolve, 50));
     demoSession.head = { kind: "unborn", name: initialBranch };
     return structuredClone(demoSession);
+  },
+  async repoClone(sourceUrl: string, _selectedPath: string): Promise<RepoSnapshot> {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    if (sourceUrl.trim() === "") {
+      throw { code: "INVALID_ARGUMENT", message: "Remote URL is empty", recovery: "inspectState", retryable: false } satisfies AppError;
+    }
+    mockWorktree(demoSession.repoId);
+    return mockSessionWithCounts();
   },
   async repoSnapshot(): Promise<RepoSnapshot> {
     return mockSessionWithCounts();
@@ -197,6 +207,21 @@ const mockAdapter = {
     if (!target) throw staleMockError("Unknown branch reference.");
     for (const b of branches) b.current = b.refId === refId;
     return mockSessionWithCounts();
+  },
+  async branchCompare(_repoId: string, localRefId: string, remoteRefId: string): Promise<BranchCompareResult> {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const branches = mockBranches();
+    const local = branches.find((b) => b.refId === localRefId);
+    const remote = branches.find((b) => b.refId === remoteRefId);
+    if (!local || !remote) throw staleMockError("Unknown branch reference.");
+    if (local.kind !== "local" || remote.kind !== "remote") {
+      throw { code: "INVALID_ARGUMENT", message: "Compare target must be a local branch and base a remote branch.", recovery: "inspectState", retryable: false } satisfies AppError;
+    }
+    if (local.oid === remote.oid) return { ahead: 0, behind: 0 };
+    if (localRefId === "refs/heads/feature/diverged" && remoteRefId === "refs/remotes/origin/feature/diverged") {
+      return { ahead: 2, behind: 1 };
+    }
+    return { ahead: 1, behind: 0 };
   },
   async confirmationPrepare(repoId: string, _expectedVersion: number, action: string, targets: string[]): Promise<ConfirmationDetails> {
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -448,6 +473,10 @@ const mockAdapter = {
     await new Promise((resolve) => setTimeout(resolve, 10));
     return { operationId: `demo-push-${++syncCounter}` };
   },
+  async remotePushForce(_repoId: string, _expectedVersion: number, _remote: string | null, _setUpstream: boolean): Promise<OperationStarted> {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return { operationId: "demo-push-force-1" };
+  },
   async stashList(_repoId: string): Promise<StashEntry[]> {
     await new Promise((resolve) => setTimeout(resolve, 10));
     return [
@@ -477,7 +506,26 @@ const mockAdapter = {
         supportReason: null
       }
     ];
-    return { files: (demoSession.conflictCount ?? 0) > 0 ? files : [], canComplete: demoSession.state === "merging" && demoSession.conflictCount === 0, canAbort: demoSession.state === "merging", abortReason: null };
+    const resolvedFiles: ResolvedConflictFile[] = demoSession.state === "merging"
+      ? [
+          { displayPath: "README.md", originalPath: null, status: "M" },
+          { displayPath: "src/lib/conflict/merge.ts", originalPath: null, status: "M" },
+          { displayPath: "src/lib/new-helper.ts", originalPath: null, status: "A" },
+          { displayPath: "src/lib/legacy-helper.ts", originalPath: null, status: "D" },
+          ...((demoSession.conflictCount ?? 0) === 0
+            ? [{ displayPath: "src/app/App.svelte", originalPath: null, status: "M" }]
+            : [])
+        ]
+      : [];
+    return {
+      files: (demoSession.conflictCount ?? 0) > 0 ? files : [],
+      resolvedFiles,
+      currentLabel: "main",
+      incomingLabel: "feature/ui",
+      canComplete: demoSession.state === "merging" && demoSession.conflictCount === 0,
+      canAbort: demoSession.state === "merging",
+      abortReason: null
+    };
   },
   async conflictPreview(_repoId: string, _pathId: string): Promise<ConflictPreview> {
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -499,6 +547,11 @@ const mockAdapter = {
     return { snapshot: structuredClone(demoSession), workingFingerprint: "demofp:25" };
   },
   async conflictMarkResolved(_repoId: string, _v: number, _p: string, _f: string, _r: string): Promise<RepoSnapshot> {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    demoSession.conflictCount = 0;
+    return structuredClone(demoSession);
+  },
+  async conflictMarkAllResolved(_repoId: string, _v: number): Promise<RepoSnapshot> {
     await new Promise((resolve) => setTimeout(resolve, 10));
     demoSession.conflictCount = 0;
     return structuredClone(demoSession);
@@ -590,13 +643,16 @@ const mockAdapter = {
     return { snapshot: structuredClone(demoSession), workingFingerprint: conflictDoc.workingFingerprint,
       resolvedBlocks: Math.max(0, doc.conflictCount - remainingBlocks), remainingBlocks };
   },
-  async mergeStart(_repoId: string, _v: number, _s: string, _t: string): Promise<MergeStartResult> {
+  async mergeStart(_repoId: string, _v: number, source: string, _t: string): Promise<MergeStartResult> {
     await new Promise((resolve) => setTimeout(resolve, 10));
     conflictDoc = null;
     demoSession.state = "merging";
     demoSession.mergeOrigin = "app";
-    demoSession.conflictCount = 1;
-    return { snapshot: structuredClone(demoSession), conflicted: true, alreadyUpToDate: false };
+    // The origin twin merges cleanly so the one-click auto-complete path
+    // is exercisable; every other source conflicts as before.
+    const clean = source === "refs/remotes/origin/main";
+    demoSession.conflictCount = clean ? 0 : 1;
+    return { snapshot: structuredClone(demoSession), conflicted: !clean, alreadyUpToDate: false };
   },
   async mergeComplete(_repoId: string, _v: number, _s: string, _b: string, _r: boolean, _h: string): Promise<MergeCompleteResult> {
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -696,9 +752,11 @@ const mockAdapter = {
     await new Promise((resolve) => setTimeout(resolve, 10));
     return structuredClone(demoSession);
   },
-  async resetHard(): Promise<RepoSnapshot> {
+  async resetHard(_repoId: string, _expectedVersion: number, oid: string, _confirmationToken: string): Promise<RepoSnapshot> {
     await new Promise((resolve) => setTimeout(resolve, 10));
-    return structuredClone(demoSession);
+    const current = mockBranches().find((b) => b.kind === "local" && b.current);
+    if (current) current.oid = oid;
+    return mockSessionWithCounts();
   },
   async settingsGet(): Promise<SettingsV1> {
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -825,7 +883,9 @@ function mockBranches(): RefItem[] {
     mockBranchStore = [
       { refId: "refs/remotes/origin/main", fullName: "refs/remotes/origin/main", label: "origin/main", kind: "remote", oid: demoCommits[0].oid, current: false, checkedOutElsewhere: false },
       { refId: "refs/heads/main", fullName: "refs/heads/main", label: "main", kind: "local", oid: demoCommits[0].oid, current: true, checkedOutElsewhere: false },
-      { refId: "refs/heads/feature/ui", fullName: "refs/heads/feature/ui", label: "feature/ui", kind: "local", oid: demoCommits[1].oid, current: false, checkedOutElsewhere: false }
+      { refId: "refs/heads/feature/ui", fullName: "refs/heads/feature/ui", label: "feature/ui", kind: "local", oid: demoCommits[1].oid, current: false, checkedOutElsewhere: false },
+      { refId: "refs/heads/feature/diverged", fullName: "refs/heads/feature/diverged", label: "feature/diverged", kind: "local", oid: demoCommits[1].oid, current: false, checkedOutElsewhere: false },
+      { refId: "refs/remotes/origin/feature/diverged", fullName: "refs/remotes/origin/feature/diverged", label: "origin/feature/diverged", kind: "remote", oid: demoCommits[2].oid, current: false, checkedOutElsewhere: false }
     ];
   }
   return mockBranchStore;

@@ -698,8 +698,8 @@ mod tests {
         }
         let repo_id = open_repo(&runner, &mut registry, &mut store, &repo).await;
 
-        // Oracle straight from git: topo order with parents.
-        let oracle = git(&repo, &["rev-list", "--topo-order", "--parents", "HEAD"]);
+        // Date order still keeps children before parents when clocks go backwards.
+        let oracle = git(&repo, &["rev-list", "--date-order", "--parents", "HEAD"]);
         let expected: Vec<(String, Vec<String>)> = oracle
             .lines()
             .filter(|l| !l.trim().is_empty())
@@ -744,8 +744,77 @@ mod tests {
         }
         assert_eq!(oids.len(), 65, "no skipped rows");
         for (i, (oid, parents)) in expected.iter().enumerate() {
-            assert_eq!(&oids[i], oid, "topo order row {i}");
+            assert_eq!(&oids[i], oid, "date order row {i}");
             assert_eq!(&parents_seen[oid], parents, "parents row {i}");
+        }
+    }
+
+    #[tokio::test]
+    async fn history_date_order_interleaves_branches_across_pages() {
+        let (runner, mut registry, mut store, root) = harness();
+        let repo = root.join("repo");
+        git(&root, &["init", "-b", "main", "repo"]);
+        commit_empty(&repo, "base", 1);
+        git(&repo, &["branch", "feature"]);
+        commit_empty(&repo, "main-old", 3);
+        commit_empty(&repo, "main-new", 5);
+        git(&repo, &["checkout", "feature"]);
+        commit_empty(&repo, "feature-old", 2);
+        commit_empty(&repo, "feature-new", 4);
+        git(&repo, &["checkout", "main"]);
+        git(&repo, &["merge", "--no-ff", "--no-commit", "feature"]);
+        commit_empty(&repo, "merge", 6);
+        let repo_id = open_repo(&runner, &mut registry, &mut store, &repo).await;
+
+        let mut rows = Vec::new();
+        let mut cursor = None;
+        let mut session_id = None;
+        loop {
+            let page = core_page(
+                &runner,
+                &mut registry,
+                &repo_id,
+                &scope_all(),
+                cursor.as_deref(),
+                2,
+            )
+            .await
+            .expect("date-ordered page");
+            let pinned_id = session_id.get_or_insert(page.history_session_id.clone());
+            assert_eq!(&page.history_session_id, pinned_id, "stable session");
+            assert_eq!(page.rows.len(), 2);
+            assert!(!page.truncated);
+            rows.extend(page.rows);
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+            assert!(rows.len() < 6, "pagination must advance");
+        }
+
+        let subjects: Vec<&str> = rows.iter().map(|row| row.subject.as_str()).collect();
+        assert_eq!(
+            subjects,
+            [
+                "merge",
+                "main-new",
+                "feature-new",
+                "main-old",
+                "feature-old",
+                "base"
+            ],
+            "newer commits must precede older commits on independent branches"
+        );
+        assert_eq!(
+            rows[0].parents.len(),
+            2,
+            "merge relationships survive paging"
+        );
+        for (index, row) in rows.iter().enumerate() {
+            for parent in &row.parents {
+                let parent_index = rows.iter().position(|candidate| &candidate.oid == parent);
+                assert!(parent_index.is_some_and(|parent_index| parent_index > index));
+            }
         }
     }
 

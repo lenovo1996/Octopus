@@ -181,6 +181,16 @@ pub struct BranchCreateResult {
     pub switch_error: Option<AppError>,
 }
 
+/// Commit counts of a local branch vs a remote branch (contract
+/// `branch_compare`): `ahead` counts local-only commits, `behind` counts
+/// remote-only commits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchCompareResult {
+    pub ahead: u64,
+    pub behind: u64,
+}
+
 /// Effective sync state vs the configured upstream (contract
 /// `remote_status`). The URL is always the redacted form.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

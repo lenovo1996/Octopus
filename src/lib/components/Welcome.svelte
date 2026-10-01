@@ -1,6 +1,6 @@
 <script lang="ts">
   // Welcome view (no repository open): Open / Clone / Init, recent list,
-  // Git preflight line. Clone is T11 — visible but disabled with a reason.
+  // Git preflight line.
   import type { AppError, PreflightData, RecentEntry } from "../ipc/types";
 
   interface Props {
@@ -11,6 +11,7 @@
     busy: boolean;
     error: AppError | null;
     onOpen: () => void;
+    onClone: () => void;
     onInit: () => void;
     onOpenRecent: (path: string) => void;
     onRemoveRecent: (entryId: string) => void;
@@ -25,6 +26,7 @@
     busy,
     error,
     onOpen,
+    onClone,
     onInit,
     onOpenRecent,
     onRemoveRecent,
@@ -46,7 +48,7 @@
       <button type="button" onclick={onInit} disabled={busy}>
         {demo ? "Init demo repository" : "Init repository…"}
       </button>
-      <button type="button" disabled title="Clone arrives in T11 (remote sync)">
+      <button type="button" onclick={onClone} disabled={busy}>
         Clone…
       </button>
     </div>
@@ -156,11 +158,6 @@
   .gd-actions button:disabled {
     cursor: not-allowed;
     opacity: 0.55;
-  }
-  .gd-actions button[title] {
-    color: var(--gd-text);
-    background: var(--gd-surface-raised);
-    border: 1px solid var(--gd-border);
   }
   .gd-welcome ul {
     list-style: none;

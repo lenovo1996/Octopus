@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { branchTipPlacement, primaryBadge, refBadge, refItemForBadge, type RefBadge } from "../../src/lib/history/refs";
+import { badgeLabel, branchTipPlacement, primaryBadge, refBadge, refItemForBadge, type RefBadge } from "../../src/lib/history/refs";
 import type { RefItem } from "../../src/lib/ipc/types";
 
 const refs: RefItem[] = [
@@ -36,6 +36,11 @@ describe("refItemForBadge", () => {
 });
 
 describe("refBadge", () => {
+  it("includes the remote name in a displayed label", () => {
+    expect(badgeLabel(refBadge(refs[0]))).toBe("feature");
+    expect(badgeLabel(refBadge(refs[1]))).toBe("origin/feature");
+  });
+
   it("marks the checked-out branch so the graph can fill it", () => {
     const current = refBadge({ ...refs[0], current: true });
     expect(current.current).toBe(true);
@@ -77,6 +82,24 @@ describe("primaryBadge", () => {
 
   it("returns null with no badges", () => {
     expect(primaryBadge([])).toBeNull();
+  });
+
+  it("shows the requested remote ahead of two local branches on the same commit", () => {
+    const localA = badge({ id: "refs/heads/A", name: "A", current: true });
+    const originA = badge({ id: "refs/remotes/origin/A", name: "A", source: "origin", kind: "remote", fullName: "refs/remotes/origin/A" });
+    const localB = badge({ id: "refs/heads/B", name: "B" });
+    for (const badges of [[localA, originA, localB], [localB, localA, originA], [originA, localB, localA]]) {
+      expect(primaryBadge(badges, originA.id)).toBe(originA);
+      expect(primaryBadge(badges, localB.id)).toBe(localB);
+      expect(badges).toHaveLength(3);
+    }
+  });
+
+  it("falls back to the checked-out local branch when the preference is absent or stale", () => {
+    const localA = badge({ id: "refs/heads/A", name: "A" });
+    const localB = badge({ id: "refs/heads/B", name: "B", current: true });
+    expect(primaryBadge([localA, localB])).toBe(localB);
+    expect(primaryBadge([localA, localB], "refs/remotes/origin/deleted")).toBe(localB);
   });
 });
 

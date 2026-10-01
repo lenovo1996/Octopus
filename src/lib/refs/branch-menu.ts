@@ -97,6 +97,23 @@ export function canCheckoutRef(ref: RefItem): boolean {
 }
 
 /**
+ * Whether a direct menu merge finishes immediately. Only clean results
+ * qualify: conflicts need human resolution and up-to-date merges have
+ * nothing to commit. Dialog merges always keep the review stop.
+ */
+export function shouldAutoCompleteMerge(direct: boolean, conflicted: boolean, alreadyUpToDate: boolean): boolean {
+  return direct && !conflicted && !alreadyUpToDate;
+}
+
+/**
+ * Subject for one-click direct merges ("Merge main into dev"),
+ * truncated to the backend's 500-character cap.
+ */
+export function directMergeSubject(sourceLabel: string, targetLabel: string): string {
+  return Array.from(`Merge ${sourceLabel} into ${targetLabel}`).slice(0, 500).join("");
+}
+
+/**
  * Whether checking out `ref` should pull right after the switch so the
  * local branch lands on the latest remote state. Only trusted checkouts of
  * real remote branches qualify: local rows, tags, untrusted repositories,
@@ -104,6 +121,18 @@ export function canCheckoutRef(ref: RefItem): boolean {
  */
 export function shouldPullAfterCheckout(ref: RefItem, trusted: boolean): boolean {
   if (ref.kind !== "remote" || !trusted) return false;
+  return suggestedTrackName(ref.label) !== "HEAD";
+}
+
+/**
+ * Whether checking out `ref` must ask before touching the local twin.
+ * Only trusted remote checkouts with an existing local twin that holds
+ * commits the remote lacks (`ahead` > 0) qualify: behind/equal twins pull
+ * cleanly, untracked remotes create a fresh branch, and the `origin/HEAD`
+ * symref has no branch of its own.
+ */
+export function shouldConfirmResetBeforeCheckout(ref: RefItem, trusted: boolean, twinExists: boolean, ahead: number): boolean {
+  if (ref.kind !== "remote" || !trusted || !twinExists || ahead <= 0) return false;
   return suggestedTrackName(ref.label) !== "HEAD";
 }
 

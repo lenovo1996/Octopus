@@ -16,8 +16,8 @@ use crate::domain::{
     OperationStarted, OperationState, RecoveryAction, RemoteStatus, RequestId, TrustState,
 };
 use crate::git::{
-    ahead_behind, classify_network_stderr, parse_progress_line, redact_url, resolve_upstream,
-    validate_remote_url, GitRunner, NetworkFault, NETWORK_TIMEOUT,
+    ahead_behind, classify_network_stderr, is_push_rejected, parse_progress_line, redact_url,
+    resolve_upstream, validate_remote_url, GitRunner, NetworkFault, NETWORK_TIMEOUT,
 };
 use crate::services::RepoRegistry;
 
@@ -192,7 +192,15 @@ fn new_operation(repo_id: &str, request_id: &str, kind: &str) -> OperationRecord
     }
 }
 
-fn network_error(stderr: &str) -> AppError {
+pub(crate) fn network_error(stderr: &str) -> AppError {
+    if is_push_rejected(stderr) {
+        return AppError::new(
+            ErrorCode::DIVERGED,
+            "Push was rejected because the remote tip differs from yours. Fetch and merge, or force-push if you rewrote local history",
+            RecoveryAction::Refresh,
+            true,
+        );
+    }
     match classify_network_stderr(stderr) {
         NetworkFault::Offline => AppError::new(
             ErrorCode::OFFLINE,
@@ -818,17 +826,25 @@ async fn prepare_push(
         format!("remote.{name}.mirror=false"),
         "push".into(),
         "--progress".into(),
-        "--no-force".into(),
-        "--no-follow-tags".into(),
-        "--recurse-submodules=no".into(),
     ];
+    argv.push(if request.force {
+        "--force-with-lease".into()
+    } else {
+        "--no-force".into()
+    });
+    argv.extend(["--no-follow-tags".into(), "--recurse-submodules=no".into()]);
     let set_upstream = upstream.is_none() && request.set_upstream;
     if set_upstream {
         argv.push("--set-upstream".into());
     }
     argv.extend(["--".into(), name.clone(), format!("HEAD:{target}")]);
     let summary = format!(
-        "push {}{name} HEAD:{target} ({url} {})",
+        "push {}{}{name} HEAD:{target} ({url} {})",
+        if request.force {
+            "--force-with-lease "
+        } else {
+            ""
+        },
         if set_upstream { "-u " } else { "" },
         short_oid(&source_oid)
     );
@@ -874,6 +890,10 @@ pub struct PushRequest {
     pub remote: Option<String>,
     #[serde(default)]
     pub set_upstream: bool,
+    /// Force-push with lease: overwrites the remote tip only when it still
+    /// matches the last fetched state, so unknown remote work is never lost.
+    #[serde(default)]
+    pub force: bool,
 }
 
 /// Secret-bearing request. Deliberately does not implement `Debug` so the
@@ -1122,7 +1142,36 @@ pub async fn remote_push(
         check_request_id(&request_id)?;
         let runner = git_runner()?;
         let mut registry = registry.lock().await;
-        core_push(&app, &runner, &mut registry, &request).await
+        // Normal push can never force: the flag is pinned off so a crafted
+        // request cannot broaden this endpoint into a history rewrite.
+        let mut normal = request;
+        normal.force = false;
+        core_push(&app, &runner, &mut registry, &normal).await
+    }
+    .await;
+    Ok(match result {
+        Ok(data) => ApiResult::ok(data, request_id),
+        Err(error) => ApiResult::err(error, request_id),
+    })
+}
+
+/// Force-push variant of [`remote_push`]: same planning, trust, version and
+/// single-destination guards, but the push runs with `--force-with-lease` so
+/// a rewritten local history can overwrite the remote tip it already knows.
+#[tauri::command]
+pub async fn remote_push_force(
+    app: AppHandle,
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: PushRequest,
+) -> Result<ApiResult<OperationStarted>, String> {
+    let request_id = request.request_id.clone();
+    let result = async {
+        check_request_id(&request_id)?;
+        let runner = git_runner()?;
+        let mut registry = registry.lock().await;
+        let mut forced = request;
+        forced.force = true;
+        core_push(&app, &runner, &mut registry, &forced).await
     }
     .await;
     Ok(match result {
@@ -1752,8 +1801,9 @@ pub async fn pull_request_create(
 pub mod prelude {
     pub use super::{
         bitbucket_connect, epoch_to_iso8601, operation_log, pull_request_create, remote_fetch,
-        remote_pull, remote_push, remote_status, BitbucketConnectRequest, FetchRequest, LogRequest,
-        PullRequest, PullRequestCreateRequest, PullRequestResult, PushRequest, RemoteContext,
+        remote_pull, remote_push, remote_push_force, remote_status, BitbucketConnectRequest,
+        FetchRequest, LogRequest, PullRequest, PullRequestCreateRequest, PullRequestResult,
+        PushRequest, RemoteContext,
     };
 }
 
@@ -1794,6 +1844,7 @@ mod tests {
             repo_id,
             remote: None,
             set_upstream: false,
+            force: false,
         };
         (root, repo, registry, request)
     }
@@ -1871,6 +1922,78 @@ mod tests {
             initial
         );
         assert!(git_text(&origin, &["tag", "--list"]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn push_rejected_after_amend_maps_diverged_then_force_pushes() {
+        let (root, repo, registry, mut request) = push_fixture("rejected");
+        let origin = root.join("origin.git");
+        advance(&repo, "local-work");
+        assert_eq!(
+            run_push_plan(&repo, &registry, &request).await,
+            JobOutcome::Ok
+        );
+        let pushed = git_text(&repo, &["rev-parse", "HEAD"]);
+        // Rewrite the pushed tip: a normal push must now fail as diverged.
+        git(&repo, &["commit", "--amend", "-m", "rewritten"]);
+        match run_push_plan(&repo, &registry, &request).await {
+            JobOutcome::Failed(error) => assert_eq!(error.code, ErrorCode::DIVERGED),
+            other => panic!("expected diverged push failure, got {other:?}"),
+        }
+        assert_eq!(git_text(&origin, &["rev-parse", "main"]), pushed);
+        // Force-with-lease overwrites the known tip and lands the rewrite.
+        request.force = true;
+        assert_eq!(
+            run_push_plan(&repo, &registry, &request).await,
+            JobOutcome::Ok
+        );
+        assert_eq!(
+            git_text(&origin, &["rev-parse", "main"]),
+            git_text(&repo, &["rev-parse", "HEAD"])
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_push_force_uses_lease_and_marks_summary() {
+        let (_root, _repo, registry, mut request) = push_fixture("lease-plan");
+        let runner = git_runner().unwrap();
+        let (normal_argv, normal_summary) =
+            prepare_push(&runner, &registry, &request).await.unwrap();
+        assert!(normal_argv.contains(&"--no-force".to_string()));
+        assert!(!normal_summary.contains("force"));
+        request.force = true;
+        let (force_argv, force_summary) = prepare_push(&runner, &registry, &request).await.unwrap();
+        assert!(force_argv.contains(&"--force-with-lease".to_string()));
+        assert!(!force_argv.iter().any(|arg| arg == "--no-force"));
+        assert!(force_summary.contains("--force-with-lease"));
+    }
+
+    #[test]
+    fn network_error_rejected_push_maps_diverged() {
+        let stderr = "To /tmp/origin.git\n ! [rejected]        main -> main (non-fast-forward)\nerror: failed to push some refs to '/tmp/origin.git'\nhint: Updates were rejected because the tip of your current branch is behind";
+        assert_eq!(network_error(stderr).code, ErrorCode::DIVERGED);
+        let stale_lease =
+            "! [rejected]        main -> main (stale info)\nerror: failed to push some refs";
+        assert_eq!(network_error(stale_lease).code, ErrorCode::DIVERGED);
+        // Transport faults still classify as before.
+        assert_eq!(
+            network_error("fatal: could not resolve host example.invalid").code,
+            ErrorCode::OFFLINE
+        );
+    }
+
+    #[test]
+    fn push_request_force_defaults_off() {
+        let request: PushRequest = serde_json::from_value(serde_json::json!({
+            "requestId": "r1",
+            "repoId": "repo",
+            "expectedVersion": 3,
+            "remote": null,
+            "setUpstream": true
+        }))
+        .unwrap();
+        assert!(!request.force);
+        assert!(request.set_upstream);
     }
 
     #[tokio::test]

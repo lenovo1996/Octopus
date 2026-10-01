@@ -5,6 +5,9 @@
   import RepositoryPicker from "../lib/components/RepositoryPicker.svelte";
   import Welcome from "../lib/components/Welcome.svelte";
   import InitModal from "../lib/components/InitModal.svelte";
+  import CloneModal from "../lib/components/CloneModal.svelte";
+  import ToastCenter from "../lib/components/ToastCenter.svelte";
+  import { pushToast } from "../lib/toast";
   import { isNative, newRequestId, normalizeTransportError } from "../lib/ipc/client";
   import { mockAdapter, createMockAdapter } from "../lib/ipc/mock";
   import { realAdapter } from "../lib/ipc/real";
@@ -24,6 +27,9 @@
   let error: AppError | null = $state(null);
   let pickerOpen = $state(false);
   let showInit = $state(false);
+  let showClone = $state(false);
+  let cloneUrl = $state("");
+  let cloneFolder = $state("");
   let initFolder = $state("");
   let initBranch = $state("main");
   let preflight: PreflightData | null = $state(null);
@@ -196,6 +202,38 @@
       const snapshot = demo ? await adapter.repoInit(initFolder, initBranch.trim()) : await realAdapter.repoInit(initFolder, initBranch.trim());
       attach(snapshot, adapter);
       showInit = false;
+      pushToast("success", `Initialized repository in ${initFolder}`);
+      await loadRecents();
+    } catch (e) { error = appError(e); }
+    finally { opening = false; }
+  }
+  function startClone() {
+    if (opening) return;
+    error = null;
+    cloneUrl = "";
+    cloneFolder = demo ? `/demo/cloned-${++demoIndex}` : "";
+    pickerOpen = false;
+    showClone = true;
+  }
+  async function browseCloneFolder() {
+    if (opening) return;
+    if (demo) { cloneFolder = `/demo/cloned-${++demoIndex}`; return; }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const folder = await open({ directory:true, multiple:false, title:"Choose clone destination" });
+      if (typeof folder === "string") cloneFolder = folder;
+    } catch (e) { error = appError(e); }
+  }
+  async function confirmClone() {
+    if (opening) return;
+    opening = true;
+    error = null;
+    try {
+      const adapter = demo ? demoRepository(cloneFolder) : mockAdapter;
+      const snapshot = demo ? await adapter.repoClone(cloneUrl.trim(), cloneFolder) : await realAdapter.repoClone(cloneUrl.trim(), cloneFolder);
+      attach(snapshot, adapter);
+      showClone = false;
+      pushToast("success", `Cloned ${cloneUrl.trim()} to ${cloneFolder}`);
       await loadRecents();
     } catch (e) { error = appError(e); }
     finally { opening = false; }
@@ -207,7 +245,7 @@
     } catch (e) { error = appError(e); }
   }
   function shortcuts(event: KeyboardEvent) {
-    if (event.defaultPrevented || pickerOpen || showInit || currentTab?.modalOpen || !(event.ctrlKey || event.metaKey)) return;
+    if (event.defaultPrevented || pickerOpen || showInit || showClone || currentTab?.modalOpen || !(event.ctrlKey || event.metaKey)) return;
     const key = event.key.toLowerCase();
     if (key === "tab" && tabs.length) {
       event.preventDefault();
@@ -221,29 +259,31 @@
 <svelte:window onkeydown={shortcuts} />
 <div class="gd-app">
   {#if tabs.length}
-    <div inert={pickerOpen || showInit || currentTab?.modalOpen || false}>
+    <div inert={pickerOpen || showInit || showClone || currentTab?.modalOpen || false}>
       <RepositoryTabs {tabs} {activeId} {closingIds} {opening} onSelect={selectTab} onClose={id => void closeTab(id)} onAdd={showPicker} onMove={moveTabById} />
     </div>
     {#each tabs as tab (tab.snapshot.repoId)}
       <div class="gd-workspace" role="tabpanel" id={`repo-panel-${tab.snapshot.repoId}`} aria-labelledby={`repo-tab-${tab.snapshot.repoId}`}
-        hidden={tab.snapshot.repoId !== activeId} inert={tab.snapshot.repoId !== activeId || pickerOpen || showInit || closingIds.includes(tab.snapshot.repoId)}>
-        <RepositoryWorkspace initialSession={tab.initialSession} active={tab.snapshot.repoId === activeId && !pickerOpen && !showInit}
+        hidden={tab.snapshot.repoId !== activeId} inert={tab.snapshot.repoId !== activeId || pickerOpen || showInit || showClone || closingIds.includes(tab.snapshot.repoId)}>
+        <RepositoryWorkspace initialSession={tab.initialSession} active={tab.snapshot.repoId === activeId && !pickerOpen && !showInit && !showClone}
           mockAdapter={tab.adapter} onOpenRepository={showPicker} onInitRepository={() => void startInit()}
           onCloseRepository={() => void closeTab(tab.snapshot.repoId)} onWorkspaceChange={state => updateWorkspace(tab.snapshot.repoId,state)} />
       </div>
     {/each}
-    {#if error && !pickerOpen && !showInit}<div class="gd-open-error" role="alert"><span>{error.message}</span><button aria-label="Dismiss repository error" onclick={() => (error = null)}>×</button></div>{/if}
+    {#if error && !pickerOpen && !showInit && !showClone}<div class="gd-open-error" role="alert"><span>{error.message}</span><button aria-label="Dismiss repository error" onclick={() => (error = null)}>×</button></div>{/if}
   {:else}
     {#if restoring}
       <div class="gd-restore" role="status">Restoring workspaces…</div>
     {:else}
-      <Welcome {demo} {preflight} {preflightError} {recents} busy={opening} {error} onOpen={() => void browse()} onInit={() => void startInit()}
+      <Welcome {demo} {preflight} {preflightError} {recents} busy={opening} {error} onOpen={() => void browse()} onClone={startClone} onInit={() => void startInit()}
         onOpenRecent={path => void openPaths([path])} onRemoveRecent={id => void removeRecent(id)} onRetryPreflight={() => void loadPreflight()} />
     {/if}
   {/if}
   {#if pickerOpen}<RepositoryPicker {demo} {recents} opened={tabs.map(tab=>tab.snapshot)} busy={opening} {error}
-    onOpen={path=>void openPaths([path])} onBrowse={()=>void browse()} onInit={()=>void startInit()} onClose={closePicker} />{/if}
+    onOpen={path=>void openPaths([path])} onBrowse={()=>void browse()} onInit={()=>void startInit()} onClone={startClone} onRemoveRecent={id=>void removeRecent(id)} onClose={closePicker} />{/if}
   {#if showInit}<InitModal folder={initFolder} branch={initBranch} busy={opening} {error} onBranch={value=>(initBranch=value)} onConfirm={()=>void confirmInit()} onCancel={()=>(showInit=false)} />{/if}
+  {#if showClone}<CloneModal sourceUrl={cloneUrl} folder={cloneFolder} busy={opening} {error} onUrl={value=>(cloneUrl=value)} onBrowseFolder={()=>void browseCloneFolder()} onConfirm={()=>void confirmClone()} onCancel={()=>(showClone=false)} />{/if}
+  <ToastCenter />
 </div>
 
 <style>

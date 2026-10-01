@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMMIT_ACTION_FORMS, validateCommitForm } from "../../src/lib/history/commit-action-forms";
+import { COMMIT_ACTION_FORMS, historyActionToast, validateCommitForm } from "../../src/lib/history/commit-action-forms";
 import { COMMIT_ACTIONS, type CommitActionId } from "../../src/lib/history/commit-menu";
 
 describe("commit action forms", () => {
@@ -37,6 +37,21 @@ describe("commit action forms", () => {
     ).toBeNull();
     expect(validateCommitForm(COMMIT_ACTION_FORMS.reword, { subject: "", body: "" })).toContain(
       "Subject"
+    );
+  });
+
+  it("toasts the submitted history action with a short oid", () => {
+    const oid = "abcdef1234567890";
+    expect(historyActionToast("cherry-pick", oid, {}, 0)).toBe("Cherry-picked abcdef1");
+    expect(historyActionToast("reset-hard", oid, {}, 0)).toBe("Hard reset to abcdef1");
+    expect(historyActionToast("create-tag", oid, { name: " v1 " }, 0)).toBe("Created tag v1");
+    expect(historyActionToast("push-to", oid, { remote: "origin", destBranch: "main" }, 0)).toBe(
+      "Pushed abcdef1 to origin/main"
+    );
+    expect(historyActionToast("interactive-rebase", oid, {}, 1)).toBe("Rebased 1 commit");
+    expect(historyActionToast("interactive-rebase", oid, {}, 3)).toBe("Rebased 3 commits");
+    expect(historyActionToast("move-to-branch", oid, { name: "feat" }, 0)).toBe(
+      "Moved abcdef1 to feat"
     );
   });
 });

@@ -470,7 +470,7 @@ fn push_terminal_error(stderr: &str) -> AppError {
             true,
         );
     }
-    if lower.contains("non-fast-forward") || lower.contains("fetch first") {
+    if crate::git::is_push_rejected(&lower) {
         return AppError::new(
             ErrorCode::DIVERGED,
             "The remote branch moved ahead; fetch and merge before pushing",

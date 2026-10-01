@@ -1,6 +1,7 @@
 import { invokeCommand, newRequestId } from "./client";
 import type {
   BitbucketConnectionResult,
+  BranchCompareResult,
   BranchCreateResult,
   ClosedResponse,
   CommitCreateRequest,
@@ -58,6 +59,13 @@ export const realAdapter = {
       requestId: newRequestId(),
       selectedPath,
       initialBranch
+    });
+  },
+  async repoClone(sourceUrl: string, selectedPath: string): Promise<RepoSnapshot> {
+    return invokeCommand<RepoSnapshot>("repo_clone", {
+      requestId: newRequestId(),
+      sourceUrl,
+      selectedPath
     });
   },
   async repoClose(repoId: RepoId): Promise<ClosedResponse> {
@@ -252,6 +260,14 @@ export const realAdapter = {
       switchAfterCreate
     });
   },
+  async branchCompare(repoId: RepoId, localRefId: string, remoteRefId: string): Promise<BranchCompareResult> {
+    return invokeCommand<BranchCompareResult>("branch_compare", {
+      requestId: newRequestId(),
+      repoId,
+      localRefId,
+      remoteRefId
+    });
+  },
   async branchSwitch(repoId: RepoId, expectedVersion: number, refId: string, newLocalName: string | null): Promise<RepoSnapshot> {
     return invokeCommand<RepoSnapshot>("branch_switch", {
       requestId: newRequestId(),
@@ -376,6 +392,15 @@ export const realAdapter = {
       setUpstream
     });
   },
+  async remotePushForce(repoId: RepoId, expectedVersion: number, remote: string | null, setUpstream: boolean): Promise<OperationStarted> {
+    return invokeCommand<OperationStarted>("remote_push_force", {
+      requestId: newRequestId(),
+      repoId,
+      expectedVersion,
+      remote,
+      setUpstream
+    });
+  },
   async operationLog(repoId: RepoId, cursor: number): Promise<OperationLogPage> {
     return invokeCommand<OperationLogPage>("operation_log", {
       requestId: newRequestId(),
@@ -434,6 +459,13 @@ export const realAdapter = {
       pathId,
       workingFingerprint,
       resolution
+    });
+  },
+  async conflictMarkAllResolved(repoId: RepoId, expectedVersion: number): Promise<RepoSnapshot> {
+    return invokeCommand<RepoSnapshot>("conflict_mark_all_resolved", {
+      requestId: newRequestId(),
+      repoId,
+      expectedVersion
     });
   },
   async conflictHunks(repoId: RepoId, pathId: string): Promise<ConflictHunks> {

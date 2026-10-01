@@ -22,18 +22,25 @@ export function refItemForBadge(refs: RefItem[], badge: Pick<RefBadge, "id">): R
 
 /**
  * The one badge a graph row shows when a commit carries several refs.
- * The local branch wins (so the checked-out fill stays visible), then
- * origin, then other remotes, then tags; the rest collapse behind a
+ * The last successful checkout choice wins, then the current branch,
+ * locals, origin, other remotes, and tags; the rest collapse behind a
  * "+N" suffix with the full list on hover.
  */
-export function primaryBadge(badges: RefBadge[]): RefBadge | null {
+export function primaryBadge(badges: RefBadge[], preferredRefId: string | null = null): RefBadge | null {
   if (badges.length === 0) return null;
   return (
+    badges.find((b) => b.id === preferredRefId) ??
+    badges.find((b) => b.current) ??
     badges.find((b) => b.kind === "local") ??
     badges.find((b) => b.kind === "remote" && b.source === "origin") ??
     badges.find((b) => b.kind === "remote") ??
     badges[0]
   );
+}
+
+/** Keep the remote name visible when local and remote twins share a commit. */
+export function badgeLabel(badge: RefBadge): string {
+  return badge.kind === "remote" ? badge.fullName.replace(/^refs\/remotes\//, "") : badge.name;
 }
 
 export interface TipRect {

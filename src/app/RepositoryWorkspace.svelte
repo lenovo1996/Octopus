@@ -22,10 +22,10 @@
   import BranchModal from "../lib/components/BranchModal.svelte";
   import CommitActionModal from "../lib/components/CommitActionModal.svelte";
   import StashSwitchModal from "../lib/components/StashSwitchModal.svelte";
-  import { COMMIT_ACTION_FORMS } from "../lib/history/commit-action-forms";
+  import { COMMIT_ACTION_FORMS, historyActionToast } from "../lib/history/commit-action-forms";
   import type { CommitActionId } from "../lib/history/commit-menu";
   import type { BranchFormOverride } from "../lib/history/commit-action-forms";
-  import { defaultBranchTab, pullRequestTargetName, resolveCheckoutTarget, shouldPullAfterCheckout, type BranchMenuAction } from "../lib/refs/branch-menu";
+  import { defaultBranchTab, directMergeSubject, pullRequestTargetName, resolveCheckoutTarget, shouldAutoCompleteMerge, shouldConfirmResetBeforeCheckout, shouldPullAfterCheckout, type BranchMenuAction } from "../lib/refs/branch-menu";
   import { activeRefHighlight, scopeAfterRefDelete } from "../lib/refs/history-scope";
   import { latestStashEntry } from "../lib/stash/latest";
   import Inspector from "../lib/components/Inspector.svelte";
@@ -38,7 +38,8 @@
   import type { WorkspaceState } from "../lib/repositories/tabs";
   import { autoStashMessage, needsStashOffer } from "../lib/repositories/tabs";
   import { AutoFetchScheduler, DEFAULT_AUTO_FETCH_MINUTES } from "../lib/sync/auto-fetch";
-  import { asSyncKind, syncFailureMessage, type SyncKind } from "../lib/sync/errors";
+  import { asSyncKind, shouldOfferPushRecovery, syncCancelMessage, syncDoneMessage, syncFailureMessage, syncStartMessage, type SyncKind } from "../lib/sync/errors";
+  import { pushToast } from "../lib/toast";
   import { BITBUCKET_TOKEN_URL, isBitbucketCloudHttps } from "../lib/sync/bitbucket";
   import { realAdapter } from "../lib/ipc/real";
   import type {
@@ -49,6 +50,7 @@
     ConflictFile,
     ConflictHunks,
     ConflictPreview,
+    ResolvedConflictFile,
     HistoryScope,
     OperationLogEntry,
     OperationRecord,
@@ -109,6 +111,13 @@
   let scopeValue = $state("all");
   /** Sidebar row highlight. Selecting a ref never narrows the graph. */
   let selectedRefId: string | null = $state(null);
+  /** Preserve the requested remote ref when checkout resolves to its local twin. */
+  let graphCheckout: { refId: string; headRefId: string } | null = $state(null);
+  const preferredGraphRefId = $derived.by(() => {
+    const head = session?.head;
+    return graphCheckout !== null && head?.kind === "branch" && head.refId === graphCheckout.headRefId
+      ? graphCheckout.refId : null;
+  });
   let refs: RefItem[] = $state([]);
   const searchController = new SearchController();
   let searchTimer: ReturnType<typeof setTimeout> | undefined = undefined;
@@ -208,9 +217,35 @@
   let branchesInitialTab: "create" | "local" = $state("local");
   let deleteConfirm: { refId: string; summary: string; token: string } | null = $state(null);
 
+  // Reset-or-cancel offer when a remote checkout finds its local twin ahead.
+  interface ResetOffer {
+    twinRefId: string;
+    twinLabel: string;
+    remoteLabel: string;
+    remoteRefId: string;
+    remoteOid: string;
+    ahead: number;
+    behind: number;
+    /** The compare read failed: show the error with Cancel only. */
+    compareFailed: boolean;
+  }
+  let resetOffer: ResetOffer | null = $state(null);
+  let resetBusy = $state(false);
+  let resetError: AppError | null = $state(null);
+
+  // Push-recovery offer parked when a push job fails diverged (e.g. after an
+  // amend): force-push, pull-and-push, or cancel. Mirrors the reset bar.
+  interface PushOffer {
+    branchLabel: string;
+    remoteLabel: string;
+  }
+  let pushOffer: PushOffer | null = $state(null);
+  let pushBusy: "force" | "pullpush" | null = $state(null);
+  let pushError: AppError | null = $state(null);
+
   // Stash-and-switch offer when the worktree is dirty.
   type StashSwitchTarget =
-    | { kind: "branch"; refId: string; label: string; trackName: string | null; pullAfter: boolean }
+    | { kind: "branch"; refId: string; requestedRefId: string; label: string; trackName: string | null; pullAfter: boolean; resetAfter: string | null }
     | { kind: "checkout"; oid: string; label: string };
   let stashSwitch: StashSwitchTarget | null = $state(null);
   let stashSwitchIncludeUntracked = $state(true);
@@ -234,6 +269,7 @@
   // through operation events with an operationGet poll fallback.
   let remoteStatus: RemoteStatus | null = $state(null);
   let syncJob: OperationRecord | null = $state(null);
+  let syncForce = $state(false);
   let syncStarting = $state(false);
   let syncRefreshing = $state(false);
   let finishedSyncOperation: string | null = null;
@@ -564,6 +600,12 @@
         syncError = null;
         syncErrorCode = null;
         syncRetryKind = null;
+        pushToast("success", syncDoneMessage(record.kind, syncForce));
+        // A manual success retires a stale offer; bar-driven jobs manage it.
+        if (!pushBusy) {
+          pushOffer = null;
+          pushError = null;
+        }
         try {
           if (!demo) session = await realAdapter.repoSnapshot(session.repoId, true);
         } catch {
@@ -573,11 +615,28 @@
         await loadStatus();
         await loadRemoteStatus();
       } else if (record.state === "failed") {
-        syncErrorCode = record.error?.code ?? record.errorCode ?? "GIT_ERROR";
-        syncRetryKind = asSyncKind(record.kind);
-        syncError = syncFailureMessage(record.kind, syncErrorCode, record.error, remoteStatus?.url ?? null);
+        const code = record.error?.code ?? record.errorCode ?? "GIT_ERROR";
+        if (shouldOfferPushRecovery(record.kind, code)) {
+          const wasParked = pushOffer !== null;
+          const head = session?.head;
+          pushOffer = {
+            branchLabel: head?.kind === "branch" ? head.name : "current branch",
+            remoteLabel: remoteStatus?.remoteName ?? "origin"
+          };
+          // A repeat failure while parked shows the backend detail; the first
+          // park keeps the bar's own short copy.
+          pushError = wasParked ? (record.error ?? null) : null;
+          syncError = null;
+          syncErrorCode = null;
+          syncRetryKind = null;
+        } else {
+          syncErrorCode = code;
+          syncRetryKind = asSyncKind(record.kind);
+          syncError = syncFailureMessage(record.kind, code, record.error, remoteStatus?.url ?? null);
+        }
         await loadRemoteStatus();
       } else if (record.state === "cancelled") {
+        pushToast("info", syncCancelMessage(record.kind));
         syncError = `${record.kind} was cancelled.`;
         syncErrorCode = null;
         syncRetryKind = null;
@@ -628,7 +687,7 @@
     }, 600);
   }
 
-  async function startSyncJob(kind: "fetch" | "pull" | "push"): Promise<void> {
+  async function startSyncJob(kind: "fetch" | "pull" | "push", force = false): Promise<void> {
     if (disposed || !session || syncDisabled || syncJobActive) return;
     syncStarting = true;
     if (kind === "fetch") autoFetch.attempted();
@@ -636,6 +695,13 @@
     syncError = null;
     syncErrorCode = null;
     syncRetryKind = null;
+    // A fresh manual sync retires a stale offer; bar-driven jobs manage it.
+    if (!pushBusy) {
+      pushOffer = null;
+      pushError = null;
+    }
+    syncForce = force;
+    pushToast("info", syncStartMessage(kind, force));
     try {
       const adapter = syncAdapter();
       const started =
@@ -643,7 +709,9 @@
           ? await adapter.remoteFetch(current.repoId, current.version, null)
           : kind === "pull"
             ? await adapter.remotePull(current.repoId, current.version)
-            : await adapter.remotePush(current.repoId, current.version, null, true);
+            : force
+              ? await adapter.remotePushForce(current.repoId, current.version, null, true)
+              : await adapter.remotePush(current.repoId, current.version, null, true);
       if (disposed || session?.repoId !== current.repoId) return;
       syncJob = { operationId: started.operationId, requestId: "", repoId: current.repoId, kind,
         state: "queued", stage: "", progress: null, errorCode: null };
@@ -675,6 +743,63 @@
     } catch (e) {
       syncError = (e as AppError).message ?? "Could not cancel the operation.";
     }
+  }
+
+  /** Start a sync job and resolve once it reaches a terminal state. */
+  async function startSyncJobAndWait(kind: "fetch" | "pull" | "push", force = false): Promise<boolean> {
+    const repoId = session?.repoId ?? null;
+    await startSyncJob(kind, force);
+    if (session === null || session.repoId !== repoId) return false;
+    if (syncError) return false;
+    // The trackSyncJob poll drives syncJob; the bound matches the backend
+    // network timeout so a backend verdict always lands first.
+    for (let i = 0; i < 600 && syncJobActive; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (session === null || session.repoId !== repoId) return false;
+    }
+    return !syncJobActive && !syncError;
+  }
+
+  async function confirmPushForce(): Promise<void> {
+    if (!session || !pushOffer || pushBusy || syncJobActive) return;
+    pushBusy = "force";
+    pushError = null;
+    try {
+      if (await startSyncJobAndWait("push", true)) pushOffer = null;
+    } finally {
+      pushBusy = null;
+    }
+  }
+
+  async function confirmPushPullPush(): Promise<void> {
+    if (!session || !pushOffer || pushBusy || syncJobActive) return;
+    const current = session;
+    pushBusy = "pullpush";
+    pushError = null;
+    try {
+      if (!(await startSyncJobAndWait("pull"))) {
+        if (session === null || session.repoId !== current.repoId) return;
+        // The pull failure owns the toolbar; move it into the bar and keep
+        // the offer so force and cancel stay one click away.
+        pushError = syncError
+          ? { code: (syncErrorCode ?? "GIT_ERROR") as AppError["code"], message: syncError, recovery: "refresh", retryable: true }
+          : null;
+        syncError = null;
+        syncErrorCode = null;
+        syncRetryKind = null;
+        return;
+      }
+      if (session === null || session.repoId !== current.repoId) return;
+      if (await startSyncJobAndWait("push")) pushOffer = null;
+    } finally {
+      pushBusy = null;
+    }
+  }
+
+  function cancelPushOffer(): void {
+    if (pushBusy) return;
+    pushOffer = null;
+    pushError = null;
   }
 
   async function loadOperationLog(): Promise<void> {
@@ -954,6 +1079,9 @@
   let mergeBusy = $state(false);
   let mergeError: AppError | null = $state(null);
   let conflictFiles: ConflictFile[] | null = $state(null);
+  let conflictResolvedFiles: ResolvedConflictFile[] = $state([]);
+  let conflictCurrentLabel = $state("");
+  let conflictIncomingLabel = $state("");
   let conflictLoading = $state(false);
   let conflictError: AppError | null = $state(null);
   let conflictSelected: string | null = $state(null);
@@ -985,6 +1113,7 @@
   let mergeApplyError: AppError | string | null = $state(null);
   let mergeNotice: string | null = $state(null);
   let mergeSubject = $state("");
+  let mergeBody = $state("");
   let reviewedStaged = $state(false);
 
   // Pull request draft (T-PR). Source is always the checked-out branch;
@@ -1073,11 +1202,31 @@
       session = result.snapshot;
       showMerge = false;
       mergeDraftCache.clear();
+      if (shouldAutoCompleteMerge(direct, result.conflicted, result.alreadyUpToDate)) {
+        // One click, one merge commit: a clean direct merge finishes here
+        // with a generated subject instead of parking at the review stop.
+        const sourceLabel = refs.find((r) => r.refId === source)?.label ?? source;
+        mergeSubject = directMergeSubject(sourceLabel, mergeTargetLabel);
+        reviewedStaged = true;
+        await completeMerge();
+        if (conflictActionError) {
+          // Completion failed (e.g. missing identity): land on the review
+          // stop with the subject prefilled so it stays retryable by hand.
+          await loadConflicts();
+          changeInspector("conflict");
+          conflictNotice = "Automatic completion failed — review and complete manually.";
+        }
+        return;
+      }
       changeInspector("conflict");
+      if (!result.alreadyUpToDate && mergeSubject.trim() === "") {
+        const sourceLabel = refs.find((ref) => ref.refId === source)?.label ?? source;
+        mergeSubject = directMergeSubject(sourceLabel, mergeTargetLabel);
+      }
       conflictNotice = result.alreadyUpToDate
         ? "Already up to date — nothing to merge."
         : result.conflicted
-          ? "Conflicts need resolution below."
+          ? null
           : "Merged cleanly — review the staged result, then complete.";
       await loadStatus();
       await loadConflicts();
@@ -1122,6 +1271,7 @@
       );
       if (pullRequest !== draft) return;
       draft.result = result;
+      pushToast("success", `Pull request ${result.reference} created`);
     } catch (e) {
       if (pullRequest !== draft) return;
       draft.error = e as AppError;
@@ -1140,6 +1290,9 @@
       const list = await mergeAdapter().conflictList(current.repoId);
       if (session === null || session.repoId !== current.repoId) return;
       conflictFiles = [...list.files];
+      conflictResolvedFiles = [...list.resolvedFiles];
+      conflictCurrentLabel = list.currentLabel;
+      conflictIncomingLabel = list.incomingLabel;
       canComplete = list.canComplete;
       canAbort = list.canAbort;
       abortReason = list.abortReason;
@@ -1317,8 +1470,32 @@
       await loadStatus();
       await loadConflicts(false, false);
       if (result.remainingBlocks === 0) {
+        const refreshed = conflictFiles?.find((file) => file.displayPath === doc.displayPath);
+        if (!refreshed || !session) {
+          throw {
+            code: "STALE_STATE",
+            message: "The resolved file could not be refreshed. Reload conflicts and retry.",
+            recovery: "refresh",
+            retryable: true
+          } satisfies AppError;
+        }
+        try {
+          session = await mergeAdapter().conflictMarkResolved(
+            current.repoId,
+            session.version,
+            refreshed.pathId,
+            result.workingFingerprint,
+            "workingFile"
+          );
+        } catch (error) {
+          await loadMergeHunks(refreshed.pathId);
+          throw error;
+        }
         closeMerge(false);
-        conflictNotice = `Resolved all ${result.resolvedBlocks} block(s). Mark it resolved when the file looks right.`;
+        conflictNotice = `Resolved and staged ${doc.displayPath}.`;
+        await loadStatus();
+        await loadConflicts(false, false);
+        if (!conflictFiles?.length) pushToast("success", "All conflicts resolved");
       } else {
         mergeNotice = `Resolved ${result.resolvedBlocks} block(s), ${result.remainingBlocks} remaining.`;
         const refreshed = conflictFiles?.find((file) => file.displayPath === doc.displayPath);
@@ -1426,6 +1603,7 @@
       closeMerge(false);
       await loadStatus();
       await loadConflicts();
+      if (!conflictFiles?.length) pushToast("success", "All conflicts resolved");
     } catch (e) {
       if (session === null || session.repoId !== current.repoId) return;
       conflictActionError = e as AppError;
@@ -1443,6 +1621,47 @@
     }
   }
 
+  async function markAllResolved(): Promise<void> {
+    if (!session || conflictBusy !== null || !conflictFiles?.length) return;
+    const current = session;
+    conflictActionError = null;
+    conflictNotice = null;
+    conflictBusy = "resolve-all";
+    try {
+      session = await mergeAdapter().conflictMarkAllResolved(current.repoId, current.version);
+      if (session === null || session.repoId !== current.repoId) return;
+      mergeDraftCache.clear();
+      closeMerge(false);
+      conflictNotice = "All current conflict results were staged. Review the resolved files, then commit the merge.";
+      pushToast("success", "All conflicts resolved");
+      await loadStatus();
+      await loadConflicts(false, false);
+    } catch (error) {
+      if (session === null || session.repoId !== current.repoId) return;
+      conflictActionError = error as AppError;
+      if (!demo) {
+        try {
+          session = await realAdapter.repoSnapshot(current.repoId, false);
+        } catch {
+          // Keep the last snapshot; the mutation error is more useful.
+        }
+      }
+      await loadStatus();
+      await loadConflicts(false, false);
+    } finally {
+      if (session?.repoId === current.repoId) conflictBusy = null;
+    }
+  }
+
+  async function selectResolvedConflict(displayPath: string): Promise<void> {
+    let row = statusFiles?.find((file) => file.displayPath === displayPath && ![" ", "!"].includes(file.indexStatus));
+    if (!row) {
+      await loadStatus();
+      row = statusFiles?.find((file) => file.displayPath === displayPath && ![" ", "!"].includes(file.indexStatus));
+    }
+    if (row) loadWorktreeDiff(row.pathId, "index", row.displayPath);
+  }
+
   async function completeMerge(): Promise<void> {
     if (!session || conflictBusy !== null || mergeSubject.trim() === "" || !reviewedStaged) return;
     const current = session;
@@ -1456,17 +1675,25 @@
         current.repoId,
         current.version,
         mergeSubject.trim(),
-        "",
+        mergeBody,
         reviewedStaged,
         head.oid
       );
       if (session === null || session.repoId !== current.repoId) return;
       session = result.snapshot;
       mergeSubject = "";
+      mergeBody = "";
       mergeDraftCache.clear();
       reviewedStaged = false;
       changeInspector("working");
       conflictNotice = null;
+      {
+        const sourceLabel = refs.find((r) => r.refId === mergeSource)?.label ?? mergeSource;
+        pushToast(
+          "success",
+          mergeSource !== "" && mergeTargetLabel !== "" ? `Merged ${sourceLabel} into ${mergeTargetLabel}` : "Merge completed"
+        );
+      }
       await loadHistory(true);
       await loadStatus();
       await loadRemoteStatus();
@@ -1524,6 +1751,7 @@
       mergeDraftCache.clear();
       closeMerge(false);
       changeInspector("working");
+      pushToast("info", "Merge aborted");
       await loadStatus();
       await loadConflicts(false);
     } catch (e) {
@@ -1559,6 +1787,7 @@
       stashNotice = result.noChange
         ? "Nothing to stash — the worktree already matches HEAD."
         : `Stashed${result.oid ? ` (${result.oid.slice(0, 8)})` : ""}.`;
+      pushToast(result.noChange ? "info" : "success", stashNotice);
       stashMessage = "";
       await loadStatus();
       await loadStashList();
@@ -1607,6 +1836,7 @@
             ? `Popped ${entry.stashId}.`
             : `Applied ${entry.stashId} (entry kept).`;
       }
+      pushToast(result.conflicted || result.dropError ? "info" : "success", stashNotice);
       await loadStatus();
       await loadStashList();
     } catch (e) {
@@ -1643,6 +1873,7 @@
     if (latest === null) {
       stashError = null;
       stashNotice = "No stashed changes to pop.";
+      pushToast("info", stashNotice);
       return;
     }
     await applyStash(latest, "pop");
@@ -1910,6 +2141,12 @@
         ? await statusAdapter().worktreeDiscardFile(current.repoId, current.version, pending.pathId, pending.token)
         : await statusAdapter().diffHunkDiscard(current.repoId, current.version, pending.pathId, pending.hunkId ?? "", pending.token);
       discardConfirm = null;
+      pushToast(
+        "success",
+        pending.kind === "hunk"
+          ? `Discarded hunk${displayPath ? ` in ${displayPath}` : ""}`
+          : `Discarded changes${displayPath ? ` in ${displayPath}` : ""}`
+      );
       if (pending.kind === "hunk" && displayPath) await refreshOpenWorktreeDiff(displayPath);
       else {
         clearDiff();
@@ -1955,6 +2192,7 @@
         done += 1;
       }
       discardConfirm = null;
+      pushToast("success", done === 1 ? "Discarded 1 file" : `Discarded ${done} files`);
       clearDiff();
       await loadStatus();
     } catch (error) {
@@ -2053,6 +2291,11 @@
       );
       if (session === null || session.repoId !== current.repoId) return;
       session = result.snapshot;
+      if (amendOid) pushToast("success", `Amended ${result.oid.slice(0, 7)}`);
+      else {
+        const files = current.stagedCount ?? 0;
+        pushToast("success", files === 1 ? "Committed 1 file" : `Committed ${files} files`);
+      }
       shell.commitMessage = newCommitDraft?.subject ?? "";
       commitBody = newCommitDraft?.body ?? "";
       amendOid = null;
@@ -2175,10 +2418,46 @@
         // Remote checkout without a local twin creates a tracking branch
         // (`git switch -c`); a twin checks out directly. Dirty worktrees go
         // through the stash offer inside switchBranch. Remote checkouts pull
-        // right after the switch so local and origin land together.
+        // right after the switch so local and origin land together — unless
+        // the twin holds commits the remote lacks, which parks a
+        // reset-or-cancel offer in the workbar slot instead of switching.
         const target = resolveCheckoutTarget(refs, ref);
         const pullAfter = shouldPullAfterCheckout(ref, session.trust === "trusted");
-        const switched = await switchBranch(target.refId, target.trackAs, pullAfter);
+        if (pullAfter && target.trackAs === null && !branchBusy) {
+          const twin = refs.find((r) => r.refId === target.refId);
+          if (twin) {
+            const current = session;
+            branchBusy = true;
+            branchBusyRef = target.refId;
+            branchError = null;
+            try {
+              const counts = await statusAdapter().branchCompare(current.repoId, twin.refId, ref.refId);
+              if (session === null || session.repoId !== current.repoId) return;
+              if (shouldConfirmResetBeforeCheckout(ref, session.trust === "trusted", true, counts.ahead)) {
+                resetOffer = {
+                  twinRefId: twin.refId, twinLabel: twin.label, remoteLabel: ref.label, remoteRefId: ref.refId,
+                  remoteOid: ref.oid, ahead: counts.ahead, behind: counts.behind, compareFailed: false
+                };
+                resetError = null;
+                return;
+              }
+            } catch (e) {
+              if (session === null || session.repoId !== current.repoId) return;
+              resetOffer = {
+                twinRefId: twin.refId, twinLabel: twin.label, remoteLabel: ref.label, remoteRefId: ref.refId,
+                remoteOid: ref.oid, ahead: 0, behind: 0, compareFailed: true
+              };
+              resetError = e as AppError;
+              return;
+            } finally {
+              if (session?.repoId === current.repoId) {
+                branchBusy = false;
+                branchBusyRef = null;
+              }
+            }
+          }
+        }
+        const switched = await switchBranch(target.refId, target.trackAs, pullAfter, null, ref.refId);
         if (switched && pullAfter) await startSyncJob("pull");
         return;
       }
@@ -2357,6 +2636,10 @@
       }
       if (session === null || session.repoId !== current.repoId) return;
       session = snapshot;
+      if (form.kind === "rename") pushToast("success", `Renamed ${form.ref.label} to ${(values.name ?? "").trim()}`);
+      else if (form.kind === "upstream") pushToast("success", `Set upstream for ${form.ref.label}`);
+      else if (form.kind === "move") pushToast("success", `Moved ${form.ref.label} to ${form.targetOid?.slice(0, 7) ?? ""}`);
+      else pushToast("success", `Pushed ${form.ref.label}`);
       closeBranchForm();
       clearDiff();
       await reloadAfterMutation();
@@ -2455,6 +2738,7 @@
       }
       if (session === null || session.repoId !== current.repoId) return;
       session = snapshot;
+      pushToast("success", historyActionToast(action, row.oid, values, plan.length));
       closeHistoryAction();
       clearDiff();
       await reloadAfterMutation();
@@ -2494,10 +2778,14 @@
       );
       if (session === null || session.repoId !== current.repoId) return;
       session = result.snapshot;
+      const createdName = newBranchName;
       if (result.switched) {
         newBranchName = "";
+        pushToast("success", `Created and switched to ${createdName}`);
       } else if (result.switchError) {
         branchError = `Branch created, but switch failed (${result.switchError.code}): ${result.switchError.message}`;
+      } else {
+        pushToast("success", `Created branch ${createdName}`);
       }
       await reloadAfterMutation();
     } catch (e) {
@@ -2574,9 +2862,22 @@
       stashSwitchDone = stash.noChange
         ? `Switched to ${target.label}. Nothing needed stashing.`
         : `Switched to ${target.label}. Changes stashed — restore them from Stashes when ready.`;
+      rememberGraphCheckout(target.kind === "branch" ? target.requestedRefId : null, snapshot);
+      pushToast("success", stash.noChange ? `Switched to ${target.label}` : `Stashed and switched to ${target.label}`);
       clearDiff();
       await reloadAfterMutation();
       if (target.kind === "branch" && target.pullAfter) await startSyncJob("pull");
+      if (target.kind === "branch" && target.resetAfter !== null) {
+        const reset = await resetCurrentToOid(target.resetAfter);
+        if (session === null || session.repoId !== current.repoId) return;
+        if (reset) {
+          resetOffer = null;
+          resetError = null;
+          stashSwitchDone = `${stashSwitchDone ?? `Switched to ${target.label}.`} Local branch reset to the remote state.`;
+        } else if (resetError) {
+          stashSwitchError = resetError;
+        }
+      }
     } catch (e) {
       if (session === null || session.repoId !== current.repoId) return;
       stashSwitchError = e as AppError;
@@ -2600,12 +2901,24 @@
   /** Branch row showing the checkout spinner (right side) during a switch. */
   let branchBusyRef: string | null = $state(null);
 
-  async function switchBranch(refId: string, trackAs: string | null = null, pullAfter = false): Promise<boolean> {
+  function rememberGraphCheckout(refId: string | null, snapshot: RepoSnapshot): void {
+    graphCheckout = refId !== null && snapshot.head.kind === "branch"
+      ? { refId, headRefId: snapshot.head.refId }
+      : null;
+  }
+
+  async function switchBranch(refId: string, trackAs: string | null = null, pullAfter = false, resetAfter: string | null = null, requestedRefId = refId): Promise<boolean> {
     if (!session || branchBusy) return false;
+    // A fresh user switch supersedes any pending reset offer; the reset
+    // flow itself keeps its offer until the reset lands.
+    if (resetAfter === null) {
+      resetOffer = null;
+      resetError = null;
+    }
     const current = session;
     if (shouldOfferStash()) {
       const target = refs.find((r) => r.refId === refId);
-      openStashSwitch({ kind: "branch", refId, label: target?.label ?? refId, trackName: trackAs, pullAfter });
+      openStashSwitch({ kind: "branch", refId, requestedRefId, label: target?.label ?? refId, trackName: trackAs, pullAfter, resetAfter });
       return false;
     }
     branchBusy = true;
@@ -2614,7 +2927,13 @@
     try {
       session = await statusAdapter().branchSwitch(current.repoId, current.version, refId, trackAs);
       if (session === null || session.repoId !== current.repoId) return false;
+      rememberGraphCheckout(requestedRefId, session);
       await reloadAfterMutation();
+      // The reset flow toasts the reset itself; a plain switch toasts here.
+      if (resetAfter === null) {
+        const label = refs.find((r) => r.refId === refId)?.label ?? refId;
+        pushToast("success", trackAs ? `Switched to ${trackAs}` : `Switched to ${label}`);
+      }
       return true;
     } catch (e) {
       if (session === null || session.repoId !== current.repoId) return false;
@@ -2632,6 +2951,74 @@
   async function trackBranch(refId: string, name: string): Promise<void> {
     if (!session || branchBusy || name.trim() === "") return;
     await switchBranch(refId, name.trim());
+  }
+
+  /** Hard-reset the current branch to `oid` through the confirmed history flow. */
+  async function resetCurrentToOid(oid: string): Promise<boolean> {
+    if (!session) return false;
+    const current = session;
+    branchBusy = true;
+    try {
+      const details = await statusAdapter().confirmationPrepare(
+        current.repoId,
+        current.version,
+        "history_reset_hard",
+        [oid]
+      );
+      if (session === null || session.repoId !== current.repoId) return false;
+      session = await statusAdapter().resetHard(
+        current.repoId,
+        current.version,
+        oid,
+        details.confirmationToken
+      );
+      if (session === null || session.repoId !== current.repoId) return false;
+      clearDiff();
+      await reloadAfterMutation();
+      const head = session?.head;
+      pushToast("success", `Reset ${head?.kind === "branch" ? head.name : "branch"} to ${oid.slice(0, 7)}`);
+      return true;
+    } catch (e) {
+      if (session === null || session.repoId !== current.repoId) return false;
+      resetError = e as AppError;
+      await loadStatus();
+      return false;
+    } finally {
+      if (session?.repoId === current.repoId) branchBusy = false;
+    }
+  }
+
+  async function confirmResetOffer(): Promise<void> {
+    if (!session || !resetOffer || resetBusy || branchBusy) return;
+    const offer = resetOffer;
+    const current = session;
+    resetBusy = true;
+    resetError = null;
+    try {
+      // Switch first so the reset lands on the twin; a dirty worktree parks
+      // the reset behind the stash modal via resetAfter.
+      const switched = await switchBranch(offer.twinRefId, null, false, offer.remoteOid, offer.remoteRefId);
+      if (session === null || session.repoId !== current.repoId) return;
+      if (!switched) {
+        if (stashSwitch === null) {
+          resetError = typeof branchError === "string"
+            ? { code: "GIT_ERROR", message: branchError, recovery: "inspectState", retryable: false }
+            : (branchError ?? { code: "GIT_ERROR", message: "Could not switch to the local branch.", recovery: "inspectState", retryable: false });
+        }
+        return;
+      }
+      if (await resetCurrentToOid(offer.remoteOid)) {
+        resetOffer = null;
+        resetError = null;
+      }
+    } finally {
+      if (session?.repoId === current.repoId) resetBusy = false;
+    }
+  }
+
+  function cancelResetOffer(): void {
+    resetOffer = null;
+    resetError = null;
   }
 
   async function askDeleteBranch(refId: string): Promise<void> {
@@ -2683,6 +3070,8 @@
         scopeValue = "all";
       }
       if (selectedRefId === target.refId) selectedRefId = null;
+      const deletedLabel = refs.find((r) => r.refId === target.refId)?.label ?? target.refId;
+      pushToast("success", `Deleted branch ${deletedLabel}`);
       await reloadAfterMutation();
     } catch (e) {
       if (session === null || session.repoId !== current.repoId) return;
@@ -2885,6 +3274,9 @@
     if (active) untrack(() => { if (session && !statusLoading) void refreshActivatedRepository(); });
   });
   $effect(() => {
+    if (graphCheckout !== null && preferredGraphRefId === null) graphCheckout = null;
+  });
+  $effect(() => {
     if (diff.selection) untrack(() => closeMerge());
   });
   $effect(() => {
@@ -3065,7 +3457,48 @@
         </button>
       {/if}
       <div class="gd-history-slot" hidden={diff.selection !== null || mergeDoc !== null || mergeLoading || mergeHunksError !== null}>
-      {#if workBar && unresolvedFiles === 0}
+      {#if resetOffer}
+        <div class="gd-resetbar" role="group" aria-label={`Local branch ${resetOffer.twinLabel} is ahead of ${resetOffer.remoteLabel}`}>
+          <p class="gd-resetbar-text">
+            {#if resetOffer.compareFailed}
+              <strong>Could not compare with {resetOffer.remoteLabel}.</strong>
+            {:else}
+              <strong>Local {resetOffer.twinLabel} has {resetOffer.ahead} commit{resetOffer.ahead === 1 ? "" : "s"} not on {resetOffer.remoteLabel}.</strong>
+              {#if resetOffer.behind > 0}<span>It is also {resetOffer.behind} commit{resetOffer.behind === 1 ? "" : "s"} behind.</span>{/if}
+            {/if}
+            {#if resetError}<span class="gd-resetbar-error" role="alert">{resetError.message}</span>{/if}
+          </p>
+          <div class="gd-resetbar-actions">
+            {#if !resetOffer.compareFailed}
+              <button type="button" class="gd-resetbar-danger" disabled={resetBusy || branchBusy} title={`Discard the local-only commits and move ${resetOffer.twinLabel} to ${resetOffer.remoteLabel}`} onclick={() => void confirmResetOffer()}>
+                {resetBusy ? "Resetting…" : "Reset local to here"}
+              </button>
+            {/if}
+            <button type="button" class="gd-resetbar-cancel" disabled={resetBusy} onclick={cancelResetOffer}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      {:else if pushOffer}
+        <div class="gd-pushbar" role="group" aria-label="Push was rejected">
+          <p class="gd-pushbar-text">
+            <strong>Push of {pushOffer.branchLabel} was rejected.</strong>
+            <span>{pushOffer.remoteLabel} has a different tip. Force push overwrites it; pull &amp; push fetches first.</span>
+            {#if pushError}<span class="gd-pushbar-error" role="alert">{pushError.message}</span>{/if}
+          </p>
+          <div class="gd-pushbar-actions">
+            <button type="button" class="gd-pushbar-danger" disabled={pushBusy !== null || syncJobActive} title={`Overwrite ${pushOffer.remoteLabel} ${pushOffer.branchLabel} with your local history`} onclick={() => void confirmPushForce()}>
+              {pushBusy === "force" ? "Force pushing…" : "Force push"}
+            </button>
+            <button type="button" class="gd-pushbar-default" disabled={pushBusy !== null || syncJobActive} title="Pull the remote branch, then push again" onclick={() => void confirmPushPullPush()}>
+              {pushBusy === "pullpush" ? "Pulling & pushing…" : "Pull & push"}
+            </button>
+            <button type="button" class="gd-pushbar-cancel" disabled={pushBusy !== null} onclick={cancelPushOffer}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      {:else if workBar && unresolvedFiles === 0}
         <button
           type="button"
           class="gd-workbar"
@@ -3096,6 +3529,7 @@
         selectedOid={shell.selectedCommitOid}
         {refLabels}
         {refs}
+        preferredRefId={preferredGraphRefId}
         {scopeValue}
         {scopeOptions}
         onScopeChange={(value) => void applyScope(value)}
@@ -3228,6 +3662,9 @@
         }}
         {mergeBanner}
         {conflictFiles}
+        {conflictResolvedFiles}
+        {conflictCurrentLabel}
+        {conflictIncomingLabel}
         conflictFilesLoading={conflictLoading}
         conflictFilesError={conflictError}
         conflictSelected={conflictSelected}
@@ -3238,6 +3675,7 @@
         {conflictActionError}
         {conflictNotice}
         {mergeSubject}
+        {mergeBody}
         {reviewedStaged}
         {canComplete}
         {canAbort}
@@ -3246,12 +3684,15 @@
         {acceptConfirm}
         onSelectConflict={(pathId) => selectConflict(pathId)}
         onReloadConflicts={() => void loadConflicts()}
+        onSelectResolvedConflict={(displayPath) => void selectResolvedConflict(displayPath)}
+        onMarkAllResolved={() => void markAllResolved()}
         onAskAccept={(side) => void askAccept(side)}
         onConfirmAccept={() => void confirmAccept()}
         onCancelAccept={() => (acceptConfirm = null)}
         onMarkWorking={() => void markResolved("workingFile")}
         onMarkDeletion={() => void markResolved("deletion")}
         onMergeSubject={(value) => (mergeSubject = value)}
+        onMergeBody={(value) => (mergeBody = value)}
         onCompleteMerge={() => void completeMerge()}
         onAskAbort={() => void askAbort()}
         onConfirmAbort={() => void confirmAbort()}
@@ -3515,6 +3956,56 @@
   .gd-workbar .gd-modified { color: var(--gd-warning); }
   .gd-workbar .gd-deleted { color: var(--gd-danger); }
   .gd-workbar-go { color: var(--gd-text-secondary); }
+  .gd-resetbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gd-space-3);
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 5px var(--gd-space-3);
+    color: var(--gd-text);
+    background: color-mix(in srgb, var(--gd-warning) 10%, var(--gd-surface-raised));
+    border: 0;
+    border-bottom: 1px solid var(--gd-border);
+    font-size: var(--gd-font-size-small);
+  }
+  .gd-resetbar-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; min-width: 0; }
+  .gd-resetbar-text strong { font-weight: 600; }
+  .gd-resetbar-text > span { color: var(--gd-text-secondary); }
+  .gd-resetbar-text .gd-resetbar-error { color: var(--gd-danger); }
+  .gd-resetbar-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+  .gd-resetbar-danger, .gd-resetbar-cancel { height: 26px; padding: 0 10px; background: transparent; border: 1px solid var(--gd-border); border-radius: 4px; color: var(--gd-text); cursor: pointer; font: 11px var(--gd-font-ui); }
+  .gd-resetbar-danger { border-color: var(--gd-danger); color: var(--gd-danger); font-weight: 600; }
+  .gd-resetbar-danger:not(:disabled):hover { background: color-mix(in srgb, var(--gd-danger) 12%, transparent); }
+  .gd-resetbar-cancel:not(:disabled):hover { background: var(--gd-surface-hover); }
+  .gd-resetbar-danger:disabled, .gd-resetbar-cancel:disabled { opacity: .4; cursor: not-allowed; }
+  .gd-resetbar-danger:focus-visible, .gd-resetbar-cancel:focus-visible { outline: 2px solid var(--gd-focus); outline-offset: 1px; }
+  .gd-pushbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gd-space-3);
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 5px var(--gd-space-3);
+    color: var(--gd-text);
+    background: color-mix(in srgb, var(--gd-warning) 10%, var(--gd-surface-raised));
+    border: 0;
+    border-bottom: 1px solid var(--gd-border);
+    font-size: var(--gd-font-size-small);
+  }
+  .gd-pushbar-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; min-width: 0; }
+  .gd-pushbar-text strong { font-weight: 600; }
+  .gd-pushbar-text > span { color: var(--gd-text-secondary); }
+  .gd-pushbar-text .gd-pushbar-error { color: var(--gd-danger); }
+  .gd-pushbar-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+  .gd-pushbar-danger, .gd-pushbar-default, .gd-pushbar-cancel { height: 26px; padding: 0 10px; background: transparent; border: 1px solid var(--gd-border); border-radius: 4px; color: var(--gd-text); cursor: pointer; font: 11px var(--gd-font-ui); }
+  .gd-pushbar-danger { border-color: var(--gd-danger); color: var(--gd-danger); font-weight: 600; }
+  .gd-pushbar-danger:not(:disabled):hover { background: color-mix(in srgb, var(--gd-danger) 12%, transparent); }
+  .gd-pushbar-default:not(:disabled):hover, .gd-pushbar-cancel:not(:disabled):hover { background: var(--gd-surface-hover); }
+  .gd-pushbar-danger:disabled, .gd-pushbar-default:disabled, .gd-pushbar-cancel:disabled { opacity: .4; cursor: not-allowed; }
+  .gd-pushbar-danger:focus-visible, .gd-pushbar-default:focus-visible, .gd-pushbar-cancel:focus-visible { outline: 2px solid var(--gd-focus); outline-offset: 1px; }
   .gd-trust-bar {
     display: flex;
     align-items: center;
