@@ -121,6 +121,12 @@ export interface RecentEntry {
   lastOpenedAt: number;
 }
 
+/** Presentation preference only; never changes repository identity or Git state. */
+export interface RepositoryAlias {
+  workspaceKey: string;
+  alias: string | null;
+}
+
 export interface RepoOpenRequest {
   requestId: RequestId;
   selectedPath: string;

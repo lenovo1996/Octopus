@@ -26,6 +26,8 @@ pub fn run() {
             repo_clone,
             repo_close,
             repo_snapshot,
+            repo_alias_get,
+            repo_alias_set,
             repo_trust_set,
             repo_recent_list,
             repo_recent_remove,

@@ -12,6 +12,8 @@ The screenshots below show the current interface with built-in browser demo data
 
 Open repositories in separate tabs, keep a draft for each workspace, and search commit history. The graph shows branches and merge relationships; selecting a commit opens its metadata, changed files, and parent comparison.
 
+Right-click a repository tab and choose **Set repository alias…**, or focus the tab and press **F2**, to set a custom tab name. Aliases are saved on this device for each worktree and survive closing tabs and restarting. Choose **Use folder name**, then **Save**, to reset the name; the original path remains available in the tab tooltip.
+
 ![Two repository tabs with a branch graph and merge commit details](docs/images/commit-history.png)
 
 ### Review, stage, and commit changes

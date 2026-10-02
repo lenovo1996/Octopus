@@ -40,6 +40,7 @@ import type {
   RefItem,
   RemovedResponse,
   RepoSnapshot,
+  RepositoryAlias,
   RepoId,
   SearchResults,
   StatusData
@@ -70,6 +71,12 @@ export const realAdapter = {
   },
   async repoClose(repoId: RepoId): Promise<ClosedResponse> {
     return invokeCommand<ClosedResponse>("repo_close", { requestId: newRequestId(), repoId });
+  },
+  async repoAliasGet(repoId: RepoId): Promise<RepositoryAlias> {
+    return invokeCommand<RepositoryAlias>("repo_alias_get", { requestId: newRequestId(), repoId });
+  },
+  async repoAliasSet(repoId: RepoId, alias: string | null): Promise<RepositoryAlias> {
+    return invokeCommand<RepositoryAlias>("repo_alias_set", { requestId: newRequestId(), repoId, alias });
   },
   async repoSnapshot(repoId: RepoId, refresh: boolean): Promise<RepoSnapshot> {
     return invokeCommand<RepoSnapshot>("repo_snapshot", {
