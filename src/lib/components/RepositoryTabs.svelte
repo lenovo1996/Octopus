@@ -1,13 +1,15 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { repositoryParent, type WorkspaceState } from "../repositories/tabs";
+  import { repositoryTabName } from "../repositories/alias";
   import { headLabel } from "../../mocks/demoSession";
   import ContextMenu from "./ContextMenu.svelte";
   import { isContextMenuKey, pointFromContextEvent, type ContextMenuItem } from "../context-menu/model";
-  let { tabs, activeId, opening, closingIds, onSelect, onClose, onAdd, onMove }: {
+  let { tabs, activeId, opening, closingIds, onSelect, onClose, onAdd, onMove, onAlias }: {
     tabs: WorkspaceState[]; activeId: string | null; opening: boolean; closingIds: string[];
     onSelect: (id: string) => void; onClose: (id: string) => void; onAdd: () => void;
     onMove: (fromId: string, toId: string, before: boolean) => void;
+    onAlias: (id: string) => void;
   } = $props();
   let list: HTMLDivElement | undefined = $state();
   let tabMenu = $state<{ id: string; x: number; y: number } | null>(null);
@@ -49,6 +51,7 @@
   function tabKey(event: KeyboardEvent, id: string) {
     const index = tabs.findIndex(tab => tab.snapshot.repoId === id);
     let next = index;
+    if (event.key === "F2") { event.preventDefault(); onAlias(id); return; }
     if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
     else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
     else if (event.key === "Home") next = 0;
@@ -79,6 +82,7 @@
     return [
       { id:"switch", label:repo.repoId === activeId ? "Current repository" : "Switch to repository", disabled:repo.repoId === activeId,
         action:() => onSelect(repo.repoId) },
+      { id:"alias", label:"Set repository alias…", hint:"F2", disabled:closing || opening, action:() => onAlias(repo.repoId) },
       { id:"move-left", label:"Move tab left", disabled:index <= 0, action:move(-1) },
       { id:"move-right", label:"Move tab right", disabled:index < 0 || index >= tabs.length - 1, action:move(1) },
       { id:"copy-path", label:"Copy repository path", action:() => navigator.clipboard.writeText(repo.displayPath) },
@@ -98,7 +102,8 @@
       {@const repo = tab.snapshot}
       {@const selected = repo.repoId === activeId}
       {@const closing = closingIds.includes(repo.repoId)}
-      {@const duplicateName = tabs.some(other => other.snapshot.repoId !== repo.repoId && other.snapshot.displayName === repo.displayName)}
+      {@const name = repositoryTabName(tab)}
+      {@const duplicateName = tabs.some(other => other.snapshot.repoId !== repo.repoId && repositoryTabName(other) === name)}
       <div class="gd-tab-wrap" class:selected class:contexted={tabMenu?.id === repo.repoId}
         class:dragging={dragId === repo.repoId}
         class:drop-before={dropTarget?.id === repo.repoId && dropTarget.before}
@@ -108,17 +113,17 @@
         ondragstart={(event) => dragStart(event, repo.repoId)} ondragend={dragEnd}
         ondragover={(event) => dragOverTab(event, repo.repoId)} ondrop={(event) => dropOnTab(event, repo.repoId)}>
         <button class="gd-repo-tab" role="tab" id={`repo-tab-${repo.repoId}`} aria-controls={`repo-panel-${repo.repoId}`}
-          aria-selected={selected} tabindex={selected ? 0 : -1} title={`${repo.displayPath}\n${headLabel(repo.head)}${tab.hasDraft ? "\nCommit draft saved" : ""}`}
-          aria-label={`Repository ${repo.displayName}${duplicateName ? ` · ${repositoryParent(repo.displayPath)}` : ""}`}
+          aria-selected={selected} tabindex={selected ? 0 : -1} title={`${name}\n${repo.displayPath}\n${headLabel(repo.head)}${tab.hasDraft ? "\nCommit draft saved" : ""}\nF2: Set repository alias`}
+          aria-label={`Repository ${name}${duplicateName ? ` · ${repositoryParent(repo.displayPath)}` : ""}`}
           onclick={() => onSelect(repo.repoId)} onkeydown={e => tabKey(e, repo.repoId)}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 6h7l2 2h7v12H4zM4 6V4h7l2 2h7v2"/></svg>
-          <span class="gd-tab-text"><strong>{repo.displayName}</strong><span>{duplicateName ? `${repositoryParent(repo.displayPath)} · ` : ""}{headLabel(repo.head)}</span></span>
+          <span class="gd-tab-text"><strong>{name}</strong><span>{duplicateName ? `${repositoryParent(repo.displayPath)} · ` : ""}{headLabel(repo.head)}</span></span>
           {#if tab.busy || closing}<span class="gd-tab-state busy" title="Git operation in progress" aria-label="Busy">···</span>
           {:else if tab.hasError}<span class="gd-tab-state error" title="This repository needs attention" aria-label="Needs attention">!</span>
           {:else if tab.hasDraft}<span class="gd-draft" title="Commit draft saved" aria-label="Commit draft saved"></span>
           {:else if tab.changedFiles}<span class="gd-tab-state" title={`${tab.changedFiles} changed files`}>{tab.changedFiles}</span>{/if}
         </button>
-        <button class="gd-close-tab" aria-label={`Close repository ${repo.displayName}`} title={tab.busy ? "Wait for the Git operation to finish" : "Close tab · draft is saved"}
+        <button class="gd-close-tab" aria-label={`Close repository ${name}`} title={tab.busy ? "Wait for the Git operation to finish" : "Close tab · draft is saved"}
           disabled={tab.busy || closing || opening} tabindex={selected ? 0 : -1} onclick={() => onClose(repo.repoId)}>×</button>
       </div>
     {/each}
@@ -129,7 +134,7 @@
   {#if tabMenu}
     {@const target = tabs.find(tab => tab.snapshot.repoId === tabMenu?.id)}
     {#if target}<ContextMenu x={tabMenu.x} y={tabMenu.y} items={menuItems(target)}
-      label={`Repository actions for ${target.snapshot.displayName}`} onClose={() => (tabMenu = null)} />{/if}
+      label={`Repository actions for ${repositoryTabName(target)}`} onClose={() => (tabMenu = null)} />{/if}
   {/if}
 </nav>
 

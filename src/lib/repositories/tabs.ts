@@ -2,6 +2,7 @@ import type { OpenWorkspaceEntry, RepoSnapshot } from "../ipc/types";
 
 export interface WorkspaceState {
   snapshot: RepoSnapshot;
+  alias?: string | null;
   busy: boolean;
   hasDraft: boolean;
   changedFiles: number | null;

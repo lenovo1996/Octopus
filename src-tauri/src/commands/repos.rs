@@ -489,6 +489,69 @@ pub struct RepoIdRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RepoAliasSetRequest {
+    pub request_id: RequestId,
+    pub repo_id: String,
+    pub alias: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryAlias {
+    pub workspace_key: String,
+    pub alias: Option<String>,
+}
+
+fn core_alias_get(
+    registry: &RepoRegistry,
+    store: &Store,
+    repo_id: &str,
+) -> Result<RepositoryAlias, AppError> {
+    let session = registry.get(repo_id).ok_or_else(session_missing)?;
+    let workspace_key = session.workspace_key();
+    let alias = store.repository_alias(&workspace_key).map(str::to_string);
+    Ok(RepositoryAlias {
+        workspace_key,
+        alias,
+    })
+}
+
+fn core_alias_set(
+    registry: &RepoRegistry,
+    store: &mut Store,
+    repo_id: &str,
+    alias: Option<&str>,
+) -> Result<RepositoryAlias, AppError> {
+    let current = core_alias_get(registry, store, repo_id)?;
+    let raw = alias.unwrap_or_default();
+    if raw
+        .chars()
+        .any(|c| c.is_control() || c == '\u{2028}' || c == '\u{2029}')
+        || raw.trim().chars().count() > 80
+    {
+        return Err(bad_request(
+            "Alias must be a single line of at most 80 characters",
+        ));
+    }
+    let alias = (!raw.trim().is_empty()).then(|| raw.trim().to_string());
+    store
+        .set_repository_alias(&current.workspace_key, alias.clone())
+        .map_err(|_| {
+            AppError::new(
+                ErrorCode::IO_ERROR,
+                "Could not save repository alias",
+                RecoveryAction::InspectState,
+                false,
+            )
+        })?;
+    Ok(RepositoryAlias {
+        workspace_key: current.workspace_key,
+        alias,
+    })
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoSnapshotRequest {
     pub request_id: RequestId,
@@ -544,6 +607,50 @@ pub struct WorkspacesRestoreRequest {
 }
 
 // ---- Commands ----
+
+#[tauri::command]
+pub async fn repo_alias_get(
+    app: AppHandle,
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: RepoIdRequest,
+) -> Result<ApiResult<RepositoryAlias>, String> {
+    let request_id = request.request_id.clone();
+    let result = async {
+        check_request_id(&request_id)?;
+        let registry = registry.lock().await;
+        core_alias_get(&registry, &store_for(&app)?, &request.repo_id)
+    }
+    .await;
+    Ok(match result {
+        Ok(data) => ApiResult::ok(data, request_id),
+        Err(error) => ApiResult::err(error, request_id),
+    })
+}
+
+#[tauri::command]
+pub async fn repo_alias_set(
+    app: AppHandle,
+    registry: State<'_, Mutex<RepoRegistry>>,
+    request: RepoAliasSetRequest,
+) -> Result<ApiResult<RepositoryAlias>, String> {
+    let request_id = request.request_id.clone();
+    let result = async {
+        check_request_id(&request_id)?;
+        let registry = registry.lock().await;
+        let mut store = store_for(&app)?;
+        core_alias_set(
+            &registry,
+            &mut store,
+            &request.repo_id,
+            request.alias.as_deref(),
+        )
+    }
+    .await;
+    Ok(match result {
+        Ok(data) => ApiResult::ok(data, request_id),
+        Err(error) => ApiResult::err(error, request_id),
+    })
+}
 
 #[tauri::command]
 pub async fn repo_open(
@@ -728,11 +835,13 @@ pub async fn repo_recent_list(
 #[tauri::command]
 pub async fn repo_recent_remove(
     app: AppHandle,
+    registry: State<'_, Mutex<RepoRegistry>>,
     request: RecentRemoveRequest,
 ) -> Result<ApiResult<RemovedResponse>, String> {
     let request_id = request.request_id.clone();
     let result = async {
         check_request_id(&request_id)?;
+        let _guard = registry.lock().await;
         let mut store = store_for(&app)?;
         if store.remove_recent(&request.entry_id) {
             Ok(RemovedResponse { removed: true })
@@ -750,6 +859,7 @@ pub async fn repo_recent_remove(
 #[tauri::command]
 pub async fn workspaces_save(
     app: AppHandle,
+    registry: State<'_, Mutex<RepoRegistry>>,
     request: WorkspacesSaveRequest,
 ) -> Result<ApiResult<WorkspacesSaved>, String> {
     let request_id = request.request_id.clone();
@@ -758,6 +868,7 @@ pub async fn workspaces_save(
         if request.entries.len() > 100 {
             return Err(bad_request("Too many workspaces to save"));
         }
+        let _guard = registry.lock().await;
         let mut store = store_for(&app)?;
         Ok::<_, AppError>(core_workspaces_save(
             &mut store,
@@ -881,8 +992,9 @@ async fn core_workspaces_restore(
 
 pub mod prelude {
     pub use super::{
-        repo_clone, repo_close, repo_init, repo_open, repo_recent_list, repo_recent_remove,
-        repo_snapshot, repo_trust_set, workspaces_restore, workspaces_save,
+        repo_alias_get, repo_alias_set, repo_clone, repo_close, repo_init, repo_open,
+        repo_recent_list, repo_recent_remove, repo_snapshot, repo_trust_set, workspaces_restore,
+        workspaces_save,
     };
 }
 
@@ -1257,6 +1369,170 @@ mod tests {
             Some(snap_two.workspace_key.as_str())
         );
         assert_eq!(store.open_workspaces().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn repository_alias_survives_restart_and_tab_close_with_worktree_isolation() {
+        let (runner, mut registry, mut store, root) = harness();
+        let repo = make_repo(&root, "repo");
+        git(&repo, &["worktree", "add", "../linked"]);
+        let first = core_open(&runner, &mut registry, &mut store, &repo)
+            .await
+            .unwrap();
+        let linked = core_open(&runner, &mut registry, &mut store, &root.join("linked"))
+            .await
+            .unwrap();
+        let before = std::fs::read(repo.join(".git/config")).unwrap();
+        let first_alias = core_alias_set(
+            &registry,
+            &mut store,
+            &first.repo_id,
+            Some("  API Việt Nam 🐙  "),
+        )
+        .unwrap();
+        assert_eq!(first_alias.alias.as_deref(), Some("API Việt Nam 🐙"));
+        assert_eq!(
+            serde_json::to_value(&first_alias).unwrap()["workspaceKey"],
+            first.workspace_key
+        );
+        core_alias_set(&registry, &mut store, &linked.repo_id, Some("Preview")).unwrap();
+        core_close(&mut registry, &first.repo_id).await.unwrap();
+        assert_eq!(
+            core_alias_get(&registry, &store, &linked.repo_id)
+                .unwrap()
+                .alias
+                .as_deref(),
+            Some("Preview")
+        );
+        let mut reopened_store = Store::open(&root.join("store"));
+        let mut reopened_registry = RepoRegistry::default();
+        let reopened = core_open(&runner, &mut reopened_registry, &mut reopened_store, &repo)
+            .await
+            .unwrap();
+        assert_eq!(reopened.display_name, first.display_name);
+        assert_eq!(reopened.head, first.head);
+        assert_eq!(reopened.workspace_key, first.workspace_key);
+        assert_eq!(
+            core_alias_get(&reopened_registry, &reopened_store, &reopened.repo_id)
+                .unwrap()
+                .alias,
+            first_alias.alias
+        );
+        core_alias_set(
+            &reopened_registry,
+            &mut reopened_store,
+            &reopened.repo_id,
+            Some("   "),
+        )
+        .unwrap();
+        let persisted = Store::open(&root.join("store"));
+        assert!(persisted.repository_alias(&first.workspace_key).is_none());
+        assert_eq!(
+            persisted.repository_alias(&linked.workspace_key),
+            Some("Preview")
+        );
+        assert_eq!(std::fs::read(repo.join(".git/config")).unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn repository_alias_validates_session_and_unicode_without_changing_git() {
+        let (runner, mut registry, mut store, root) = harness();
+        let repo = make_repo(&root, "alias-validation");
+        let snapshot = core_open(&runner, &mut registry, &mut store, &repo)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.trust, TrustState::ReadOnly);
+        core_alias_set(
+            &registry,
+            &mut store,
+            &snapshot.repo_id,
+            Some(&"🐙".repeat(80)),
+        )
+        .unwrap();
+        for bad in [
+            "x".repeat(81),
+            "a\nb".into(),
+            "a\0b".into(),
+            "a\u{7f}b".into(),
+            "a\u{2028}b".into(),
+        ] {
+            assert_eq!(
+                core_alias_set(&registry, &mut store, &snapshot.repo_id, Some(&bad))
+                    .unwrap_err()
+                    .code,
+                ErrorCode::INVALID_ARGUMENT
+            );
+        }
+        assert_eq!(
+            store
+                .repository_alias(&snapshot.workspace_key)
+                .unwrap()
+                .chars()
+                .count(),
+            80
+        );
+        assert_eq!(
+            core_alias_set(&registry, &mut store, "unknown", Some("Alias"))
+                .unwrap_err()
+                .code,
+            ErrorCode::REPO_UNAVAILABLE
+        );
+        assert_eq!(
+            registry.get(&snapshot.repo_id).unwrap().version,
+            snapshot.version
+        );
+        core_alias_set(&registry, &mut store, &snapshot.repo_id, None).unwrap();
+        assert!(core_alias_get(&registry, &store, &snapshot.repo_id)
+            .unwrap()
+            .alias
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn repository_alias_failed_save_keeps_previous_alias() {
+        let (runner, mut registry, mut store, root) = harness();
+        let repo = make_repo(&root, "alias-write-error");
+        let snapshot = core_open(&runner, &mut registry, &mut store, &repo)
+            .await
+            .unwrap();
+        core_alias_set(&registry, &mut store, &snapshot.repo_id, Some("Original")).unwrap();
+        // A directory at the temporary-write path reliably fails even as root.
+        std::fs::create_dir(
+            root.join("store")
+                .join(Store::file_name())
+                .with_extension("json.tmp"),
+        )
+        .unwrap();
+        let error =
+            core_alias_set(&registry, &mut store, &snapshot.repo_id, Some("Unsaved")).unwrap_err();
+        assert_eq!(error.code, ErrorCode::IO_ERROR);
+        assert_eq!(
+            store.repository_alias(&snapshot.workspace_key),
+            Some("Original")
+        );
+        assert_eq!(
+            Store::open(&root.join("store")).repository_alias(&snapshot.workspace_key),
+            Some("Original")
+        );
+    }
+
+    #[test]
+    fn repository_alias_migrates_old_store_and_preserves_other_preferences() {
+        let root = temp_root("alias-migration");
+        std::fs::write(root.join(Store::file_name()), r#"{"schemaVersion":1,"recentRepositories":[],"trustedRepositories":["existing-trust"],"settings":{"version":7,"fontScale":1.125,"autoFetchMinutes":10}}"#).unwrap();
+        let mut store = Store::open(&root);
+        assert!(store.repository_alias("worktree-v1:61").is_none());
+        store
+            .set_repository_alias("worktree-v1:61", Some("API".into()))
+            .unwrap();
+        store.save_open_workspaces(vec![], None);
+        store.update_settings(1.25, 5).unwrap();
+        let reopened = Store::open(&root);
+        assert_eq!(reopened.repository_alias("worktree-v1:61"), Some("API"));
+        assert!(reopened.is_trusted("existing-trust"));
+        assert_eq!(reopened.settings().font_scale, 1.25);
+        assert_eq!(reopened.settings().auto_fetch_minutes, 5);
+        assert!(!root.join("gitdock-settings.json.corrupt").exists());
     }
 
     #[tokio::test]

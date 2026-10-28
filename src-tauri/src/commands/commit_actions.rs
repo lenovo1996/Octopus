@@ -13,8 +13,8 @@
 //!   nothing runs `branch -D`, and reset-hard additionally consumes a
 //!   single-use confirmation token.
 //! - `merge_commit` reuses the app-origin merge flow so `merge_complete` and
-//!   `merge_abort` keep working. Cherry-pick and revert land with
-//!   `--no-commit` so the user reviews the staged result before committing.
+//!   `merge_abort` keep working. Cherry-pick commits with the original
+//!   message; revert uses `--no-commit` so its staged result can be reviewed.
 //! - Amend-family actions (`reword`, `modify`, `edit-author`, `split`) are
 //!   HEAD-scoped in v1: older commits go through `rebase_interactive_from`,
 //!   which replays an explicit pick/squash/fixup/drop/reword plan through a
@@ -537,7 +537,7 @@ async fn core_history_push_to(
     fresh_snapshot(runner, registry, repo_id).await
 }
 
-// ---- cherry-pick (staged, --no-commit) ----
+// ---- cherry-pick (commit with the original message) ----
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -567,7 +567,7 @@ async fn core_cherry_pick_onto(
     let out = runner
         .run(
             &session.worktree_root,
-            &["cherry-pick", "--no-commit", oid],
+            &["cherry-pick", "--no-edit", "--cleanup=verbatim", oid],
             WRITE_TIMEOUT,
         )
         .await
@@ -579,13 +579,18 @@ async fn core_cherry_pick_onto(
         let _ = fresh_snapshot(runner, registry, repo_id).await;
         return Err(AppError::new(
             ErrorCode::CONFLICTS_PRESENT,
-            "The cherry-pick stopped on conflicts; resolve them, then commit the staged result",
+            "The cherry-pick stopped on conflicts; resolve and stage them, then run git cherry-pick --continue to commit with the original message",
             RecoveryAction::ResolveConflict,
             false,
         ));
     }
     let detail = String::from_utf8_lossy(&out.stderr);
-    if detail.contains("is empty") || detail.contains("nothing to commit") {
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if detail.contains("is empty")
+        || detail.contains("is now empty")
+        || detail.contains("nothing to commit")
+        || stdout.contains("nothing to commit")
+    {
         let _ = runner
             .run(
                 &session.worktree_root,
@@ -1926,8 +1931,91 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cherry_pick_stages_without_committing() {
+    async fn cherry_pick_commits_with_original_message_and_author() {
         let (_dir, repo) = temp_repo("actions-pick");
+        commit_file(&repo, "base.txt", "base\n", "base");
+        git(&repo, &["checkout", "-b", "feature"]);
+        commit_file(
+            &repo,
+            "pick.txt",
+            "picked\n",
+            "picked change – tiếng Việt\n\nFull description.\n# Keep this message line.\n",
+        );
+        let picked = oid_of(&repo, "HEAD");
+        git(&repo, &["checkout", "main"]);
+        commit_file(&repo, "main.txt", "main\n", "main change");
+        let before = oid_of(&repo, "HEAD");
+        git(&repo, &["config", "commit.cleanup", "strip"]);
+        git(&repo, &["config", "user.name", "Different committer"]);
+
+        let runner = git_runner().expect("system git");
+        let mut registry = RepoRegistry::default();
+        let repo_id = open_repo(&mut registry, &repo, TrustState::Trusted);
+        let version = version_of(&registry, &repo_id);
+        let snapshot = core_cherry_pick_onto(&runner, &mut registry, &repo_id, version, &picked)
+            .await
+            .expect("cherry-pick");
+        let after = oid_of(&repo, "HEAD");
+        assert_ne!(after, before);
+        assert_ne!(after, picked);
+        assert_eq!(oid_of(&repo, "HEAD^"), before);
+        for format in ["%B", "%an%n%ae%n%aI"] {
+            let source = StdCommand::new("git")
+                .current_dir(&repo)
+                .args(["show", "-s", &format!("--format={format}"), &picked])
+                .output()
+                .expect("source metadata");
+            let result = StdCommand::new("git")
+                .current_dir(&repo)
+                .args(["show", "-s", &format!("--format={format}"), "HEAD"])
+                .output()
+                .expect("result metadata");
+            assert!(source.status.success() && result.status.success());
+            assert_eq!(result.stdout, source.stdout);
+        }
+        assert_eq!(
+            std::fs::read_to_string(repo.join("pick.txt")).unwrap(),
+            "picked\n"
+        );
+        assert_eq!(snapshot.state, RepoState::Normal);
+        assert_eq!(snapshot.staged_count, Some(0));
+        assert_eq!(snapshot.unstaged_count, Some(0));
+        assert!(snapshot.version > version);
+        assert!(
+            matches!(snapshot.head, crate::domain::HeadState::Branch { name, oid, .. } if name == "main" && oid == after)
+        );
+        assert!(!repo.join(".git/CHERRY_PICK_HEAD").exists());
+    }
+
+    #[tokio::test]
+    async fn cherry_pick_conflict_reports_resolve_path() {
+        let (_dir, repo) = temp_repo("actions-pick-conflict");
+        commit_file(&repo, "a.txt", "base\n", "base");
+        git(&repo, &["checkout", "-b", "feature"]);
+        commit_file(&repo, "a.txt", "feature\n", "feature change");
+        let picked = oid_of(&repo, "HEAD");
+        git(&repo, &["checkout", "main"]);
+        commit_file(&repo, "a.txt", "main\n", "main change");
+        let before = oid_of(&repo, "HEAD");
+
+        let runner = git_runner().expect("system git");
+        let mut registry = RepoRegistry::default();
+        let repo_id = open_repo(&mut registry, &repo, TrustState::Trusted);
+        let version = version_of(&registry, &repo_id);
+        let err = core_cherry_pick_onto(&runner, &mut registry, &repo_id, version, &picked)
+            .await
+            .expect_err("conflict");
+        assert_eq!(err.code, ErrorCode::CONFLICTS_PRESENT);
+        assert_eq!(oid_of(&repo, "HEAD"), before);
+        assert_eq!(oid_of(&repo, "CHERRY_PICK_HEAD"), picked);
+        assert!(std::fs::read_to_string(repo.join(".git/MERGE_MSG"))
+            .unwrap()
+            .starts_with("feature change"));
+    }
+
+    #[tokio::test]
+    async fn cherry_pick_empty_result_does_not_create_commit_or_leave_operation() {
+        let (_dir, repo) = temp_repo("actions-pick-empty");
         commit_file(&repo, "base.txt", "base\n", "base");
         git(&repo, &["checkout", "-b", "feature"]);
         commit_file(&repo, "pick.txt", "picked\n", "picked change");
@@ -1940,35 +2028,56 @@ mod tests {
         let version = version_of(&registry, &repo_id);
         core_cherry_pick_onto(&runner, &mut registry, &repo_id, version, &picked)
             .await
-            .expect("cherry-pick");
-        // Staged, not committed: HEAD unchanged, index holds the file.
-        assert_eq!(oid_of(&repo, "HEAD"), oid_of(&repo, "main"));
-        let staged = StdCommand::new("git")
-            .current_dir(&repo)
-            .args(["diff", "--cached", "--name-only"])
-            .output()
-            .expect("diff");
-        assert!(String::from_utf8_lossy(&staged.stdout).contains("pick.txt"));
+            .expect("first cherry-pick");
+        let before = oid_of(&repo, "HEAD");
+        let version = version_of(&registry, &repo_id);
+        let err = core_cherry_pick_onto(&runner, &mut registry, &repo_id, version, &picked)
+            .await
+            .expect_err("already applied");
+        assert_eq!(err.code, ErrorCode::INVALID_ARGUMENT);
+        assert!(err.message.contains("no changes"));
+        assert_eq!(oid_of(&repo, "HEAD"), before);
+        assert!(!repo.join(".git/CHERRY_PICK_HEAD").exists());
+        assert!(!repo.join(".git/sequencer").exists());
+        assert_eq!(
+            read_status(&runner, &repo).await.unwrap().counts().staged,
+            0
+        );
     }
 
     #[tokio::test]
-    async fn cherry_pick_conflict_reports_resolve_path() {
-        let (_dir, repo) = temp_repo("actions-pick-conflict");
-        commit_file(&repo, "a.txt", "base\n", "base");
+    async fn cherry_pick_rejects_stale_version_and_dirty_worktree() {
+        let (_dir, repo) = temp_repo("actions-pick-preconditions");
+        commit_file(&repo, "base.txt", "base\n", "base");
         git(&repo, &["checkout", "-b", "feature"]);
-        commit_file(&repo, "a.txt", "feature\n", "feature change");
+        commit_file(&repo, "pick.txt", "picked\n", "picked change");
         let picked = oid_of(&repo, "HEAD");
         git(&repo, &["checkout", "main"]);
-        commit_file(&repo, "a.txt", "main\n", "main change");
+        let before = oid_of(&repo, "HEAD");
 
         let runner = git_runner().expect("system git");
         let mut registry = RepoRegistry::default();
         let repo_id = open_repo(&mut registry, &repo, TrustState::Trusted);
         let version = version_of(&registry, &repo_id);
+        let err = core_cherry_pick_onto(&runner, &mut registry, &repo_id, version + 1, &picked)
+            .await
+            .expect_err("stale version");
+        assert_eq!(err.code, ErrorCode::STALE_STATE);
+        assert_eq!(oid_of(&repo, "HEAD"), before);
+        assert!(!repo.join("pick.txt").exists());
+
+        std::fs::write(repo.join("base.txt"), "user changes\n").unwrap();
         let err = core_cherry_pick_onto(&runner, &mut registry, &repo_id, version, &picked)
             .await
-            .expect_err("conflict");
-        assert_eq!(err.code, ErrorCode::CONFLICTS_PRESENT);
+            .expect_err("dirty worktree");
+        assert_eq!(err.code, ErrorCode::DIRTY_WORKTREE);
+        assert_eq!(oid_of(&repo, "HEAD"), before);
+        assert_eq!(
+            std::fs::read_to_string(repo.join("base.txt")).unwrap(),
+            "user changes\n"
+        );
+        assert!(!repo.join("pick.txt").exists());
+        assert!(!repo.join(".git/CHERRY_PICK_HEAD").exists());
     }
 
     #[tokio::test]

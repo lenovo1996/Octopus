@@ -69,7 +69,7 @@ export const COMMIT_ACTION_FORMS: Record<CommitActionId, CommitActionForm> = {
   "cherry-pick": {
     id: "cherry-pick",
     title: "Cherry-pick onto HEAD",
-    description: "Stages the commit on HEAD without committing, so the result can be reviewed first. Conflicts stop with guidance.",
+    description: "Applies the selected commit onto HEAD and automatically commits with its original message. Conflicts stop with guidance.",
     fields: [],
     submitLabel: "Cherry-pick"
   },

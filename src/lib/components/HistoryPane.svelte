@@ -11,7 +11,7 @@
   import ColumnResize from "./ColumnResize.svelte";
   import { COLUMNS_KEY, COLUMN_LIMITS, clampColumn, defaultColumns, restoreColumns, type HistoryColumn } from "../history/columns";
   import { formatDateTime } from "../format/date";
-  import { badgeLabel, branchTipPlacement, primaryBadge, refItemForBadge, refsByCommit, type RefBadge } from "../history/refs";
+  import { badgeLabel, branchTipPlacement, originTwin, primaryBadge, refItemForBadge, refsByCommit, type RefBadge } from "../history/refs";
   import RefKindIcon from "./RefKindIcon.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import { isContextMenuKey, pointFromContextEvent, type ContextMenuItem } from "../context-menu/model";
@@ -502,6 +502,8 @@
         {@const badges = badgesFor(row)}
         {@const committedAt = formatDateTime(row.committedAt)}
         {@const primary = primaryBadge(badges, preferredRefId)}
+        {@const twin = primary ? originTwin(badges, primary) : null}
+        {@const extraCount = badges.length - (twin ? 2 : 1)}
         {@const nodeRadius = row.parents.length > 1 ? 5 : 4}
         {@const nodeX = laneX(laidRow?.lane ?? 0) - graphScrollLeft}
         {@const showBranchLink = primary && laidRow && nodeX >= nodeRadius && nodeX <= graphWidth - nodeRadius}
@@ -519,10 +521,10 @@
                   <span class="gd-ref-labels">
                   <span
                     class="gd-ref-badge"
-                    class:current={primary.current}
+                    class:current={primary.current || twin?.current === true}
                     tabindex="0"
                     role="button"
-                    aria-label={`${primary.source} ${primary.name}`}
+                    aria-label={twin ? `local ${primary.name}, origin ${primary.name}, same commit` : `${primary.source} ${primary.name}`}
                     oncontextmenu={(event) => openBadgeMenu(event, primary)}
                     ondblclick={() => doubleClickBadge(primary)}
                     onmouseenter={(event) => showBranchTip(event, badges)}
@@ -537,9 +539,12 @@
                       }
                     }}
                   >
-                    <span class="gd-ref-source"><RefKindIcon kind={primary.kind} /></span><span class="gd-ref-name">{badgeLabel(primary)}</span>
+                    <span class="gd-ref-source">
+                      {#if twin}<RefKindIcon kind="local" /><RefKindIcon kind="remote" />
+                      {:else}<RefKindIcon kind={primary.kind} />{/if}
+                    </span><span class="gd-ref-name">{badgeLabel(primary)}</span>
                   </span>
-                  {#if badges.length > 1}<span class="gd-ref-extra">+{badges.length - 1}</span>{/if}
+                  {#if extraCount > 0}<span class="gd-ref-extra">+{extraCount}</span>{/if}
                   </span>
                   <svg class="gd-branch-link" class:visible={showBranchLink} height={rowHeight} aria-hidden="true">
                     <rect y={rowHeight / 2} width="100%" height="1" fill="var(--commit-color)" opacity="0.5" shape-rendering="crispEdges" />
@@ -709,7 +714,7 @@
   .gd-branch-link.visible { visibility: visible; }
   .gd-ref-badge { display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; max-width: 100%; border: 1px solid var(--commit-color); border-radius: var(--gd-radius-control); background: transparent; color: var(--commit-color); font-size: 11px; line-height: 1; padding: 3px 6px; white-space: nowrap; }
   .gd-ref-badge.current { background: var(--commit-color); color: var(--gd-on-accent); }
-  .gd-ref-source { display: inline-flex; }
+  .gd-ref-source { display: inline-flex; gap: 3px; flex: 0 0 auto; }
   .gd-ref-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
   .gd-ref-badge:focus-visible { outline: 2px solid var(--gd-focus); outline-offset: 1px; }
   .gd-ref-extra { flex: 0 0 auto; border: 1px solid var(--commit-color); border-radius: var(--gd-radius-control); color: var(--commit-color); font-size: 10px; line-height: 1; padding: 3px 6px; white-space: nowrap; cursor: default; }

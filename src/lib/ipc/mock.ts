@@ -1,4 +1,5 @@
 import { editableMergeText } from "../conflict/merge";
+import { aliasValidationError } from "../repositories/alias";
 import { demoPreflight } from "../../mocks/demoPreflight";
 import { demoCommits } from "../../mocks/demoRepo";
 import { demoRecents, demoSession as initialDemoSession } from "../../mocks/demoSession";
@@ -42,6 +43,7 @@ import type {
   StashEntry,
   StashSaveResult,
   RecentEntry,
+  RepositoryAlias,
   RefItem,
   RepoSnapshot,
   SearchResults,
@@ -64,6 +66,8 @@ function demoRows(): CommitRow[] {
 }
 
 let mockSettings: SettingsV1 = { version: 1, fontScale: 1, autoFetchMinutes: 5 };
+const demoAliases = new Map<string, string>();
+const DEMO_ALIAS_PREFIX = "octopus.demo.alias:";
 
 /**
  * Explicit browser demo / test adapter. Shares the same DTOs as the real
@@ -111,6 +115,23 @@ const mockAdapter = {
   },
   async repoClose(): Promise<{ closed: boolean }> {
     return { closed: true };
+  },
+  async repoAliasGet(_repoId: string): Promise<RepositoryAlias> {
+    const key = demoSession.workspaceKey;
+    return { workspaceKey: key, alias: typeof localStorage === "undefined" ? demoAliases.get(key) ?? null : localStorage.getItem(DEMO_ALIAS_PREFIX + key) };
+  },
+  async repoAliasSet(_repoId: string, alias: string | null): Promise<RepositoryAlias> {
+    const error = aliasValidationError(alias ?? "");
+    if (error) throw { code: "INVALID_ARGUMENT", message: error, recovery: "inspectState", retryable: false } satisfies AppError;
+    const next = alias?.trim() || null;
+    const key = demoSession.workspaceKey;
+    if (typeof localStorage !== "undefined") {
+      if (next === null) localStorage.removeItem(DEMO_ALIAS_PREFIX + key);
+      else localStorage.setItem(DEMO_ALIAS_PREFIX + key, next);
+    }
+    if (next === null) demoAliases.delete(key);
+    else demoAliases.set(key, next);
+    return { workspaceKey: key, alias: next };
   },
   async repoRecentList(): Promise<RecentEntry[]> {
     return structuredClone(demoRecents);

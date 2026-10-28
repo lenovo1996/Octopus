@@ -38,6 +38,16 @@ export function primaryBadge(badges: RefBadge[], preferredRefId: string | null =
   );
 }
 
+/** Badges must come from one commit row; only same-name local/origin twins combine. */
+export function originTwin(badges: RefBadge[], primary: RefBadge): RefBadge | null {
+  const twinRef = primary.kind === "local"
+    ? `refs/remotes/origin/${primary.name}`
+    : primary.kind === "remote" && primary.fullName === `refs/remotes/origin/${primary.name}`
+      ? `refs/heads/${primary.name}`
+      : null;
+  return twinRef === null ? null : badges.find(badge => badge.fullName === twinRef) ?? null;
+}
+
 /** Keep the remote name visible when local and remote twins share a commit. */
 export function badgeLabel(badge: RefBadge): string {
   return badge.kind === "remote" ? badge.fullName.replace(/^refs\/remotes\//, "") : badge.name;

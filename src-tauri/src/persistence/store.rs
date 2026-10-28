@@ -2,6 +2,7 @@
 //! T03 owns recents + trust; T14 extends settings with migrations.
 //! Atomic temp-write + rename; corrupted files are backed up, then defaulted.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -56,6 +57,9 @@ pub struct StoreData {
     pub open_workspaces: Vec<OpenWorkspaceEntry>,
     #[serde(default)]
     pub active_workspace: Option<String>,
+    /// Presentation-only aliases, keyed by exact worktree identity, retained after tab close.
+    #[serde(default)]
+    pub repository_aliases: BTreeMap<String, String>,
 }
 
 impl Default for StoreData {
@@ -67,6 +71,7 @@ impl Default for StoreData {
             settings: SettingsV1::default(),
             open_workspaces: Vec::new(),
             active_workspace: None,
+            repository_aliases: BTreeMap::new(),
         }
     }
 }
@@ -134,6 +139,28 @@ impl Store {
 
     pub fn recents(&self) -> &[RecentEntry] {
         &self.data.recent_repositories
+    }
+
+    pub fn repository_alias(&self, key: &str) -> Option<&str> {
+        self.data.repository_aliases.get(key).map(String::as_str)
+    }
+
+    pub fn set_repository_alias(
+        &mut self,
+        key: &str,
+        alias: Option<String>,
+    ) -> std::io::Result<()> {
+        let previous = self.data.repository_aliases.clone();
+        if let Some(alias) = alias {
+            self.data.repository_aliases.insert(key.to_string(), alias);
+        } else {
+            self.data.repository_aliases.remove(key);
+        }
+        if let Err(error) = self.save() {
+            self.data.repository_aliases = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn is_trusted(&self, key: &str) -> bool {
