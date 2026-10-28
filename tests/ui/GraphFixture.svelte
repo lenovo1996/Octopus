@@ -20,6 +20,7 @@
     return { refId: fullName, fullName, label, kind, oid: row.oid, current: i === 0, checkedOutElsewhere: false };
   });
   refs.push({ ...refs[0], refId: "refs/remotes/origin/main", fullName: "refs/remotes/origin/main", label: "origin/main", kind: "remote", current: false });
+  refs.push({ ...refs[3], refId: `refs/remotes/origin/${refs[3].label}`, fullName: `refs/remotes/origin/${refs[3].label}`, label: `origin/${refs[3].label}`, kind: "remote", current: false });
   const graph = layoutGraph(rows, new Map());
   const noop = () => {};
 </script>

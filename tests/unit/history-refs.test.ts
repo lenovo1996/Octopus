@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { badgeLabel, branchTipPlacement, primaryBadge, refBadge, refItemForBadge, type RefBadge } from "../../src/lib/history/refs";
+import { badgeLabel, branchTipPlacement, originTwin, primaryBadge, refBadge, refItemForBadge, refsByCommit, type RefBadge } from "../../src/lib/history/refs";
 import type { RefItem } from "../../src/lib/ipc/types";
 
 const refs: RefItem[] = [
@@ -100,6 +100,39 @@ describe("primaryBadge", () => {
     const localB = badge({ id: "refs/heads/B", name: "B", current: true });
     expect(primaryBadge([localA, localB])).toBe(localB);
     expect(primaryBadge([localA, localB], "refs/remotes/origin/deleted")).toBe(localB);
+  });
+});
+
+describe("originTwin", () => {
+  it("pairs the same local/origin branch in either primary direction", () => {
+    const badges = refs.map(refBadge);
+    expect(originTwin(badges, badges[0])).toBe(badges[1]);
+    expect(originTwin(badges, badges[1])).toBe(badges[0]);
+  });
+
+  it("pairs branches with slashes and does not require the current branch", () => {
+    const badges = refs.map(ref => refBadge({ ...ref, fullName: `${ref.fullName}/nested`, label: `${ref.label}/nested` }));
+    expect(originTwin(badges, badges[0])).toBe(badges[1]);
+    expect(badges.every(badge => !badge.current)).toBe(true);
+  });
+
+  it("does not pair diverged tips, other branch names, tags, or other remotes", () => {
+    const grouped = refsByCommit([refs[0], { ...refs[1], oid: "bbb" }]);
+    expect(originTwin(grouped.get("aaa")!, refBadge(refs[0]))).toBeNull();
+    expect(originTwin([refBadge(refs[0]), refBadge({ ...refs[1], fullName: "refs/remotes/origin/other" })], refBadge(refs[0]))).toBeNull();
+    const upstream = refBadge({ ...refs[1], fullName: "refs/remotes/upstream/feature" });
+    expect(originTwin([refBadge(refs[0]), upstream], refBadge(refs[0]))).toBeNull();
+    expect(originTwin([refBadge(refs[0]), upstream], upstream)).toBeNull();
+    const tag = refBadge({ ...refs[0], kind: "tag", fullName: "refs/tags/feature" });
+    expect(originTwin([tag, refBadge(refs[1])], tag)).toBeNull();
+  });
+
+  it("keeps unrelated refs separate and preserves the selected checkout identity", () => {
+    const badges = [...refs, { ...refs[0], refId: "refs/heads/other", fullName: "refs/heads/other", label: "other", current: true }].map(refBadge);
+    const primary = primaryBadge(badges, refs[1].refId)!;
+    expect(primary.id).toBe(refs[1].refId);
+    expect(originTwin(badges, primary)?.id).toBe(refs[0].refId);
+    expect(badges).toHaveLength(3);
   });
 });
 

@@ -1394,14 +1394,39 @@ async fn check_branch_name(
     Ok(trimmed.to_string())
 }
 
+/// Preserve the HTTPS account, port, path, and URL-scoped Git configuration.
+/// SCP-style SSH uses HTTPS credentials without reusing the SSH login.
+fn pr_credential_input(remote_url: &str) -> Result<String, AppError> {
+    if remote_url.chars().any(char::is_control) {
+        return Err(bad_request("Remote URL contains control characters"));
+    }
+    let remote_url = remote_url.trim();
+    validate_remote_url(remote_url).map_err(|_| bad_request("Invalid credential remote URL"))?;
+    if detect_pr_provider(remote_url).is_none() {
+        return Err(bad_request("Unsupported credential remote URL"));
+    }
+    let url = if remote_url.contains("://") {
+        remote_url.to_string()
+    } else {
+        let (_, host_path) = remote_url.split_once('@').unwrap();
+        let (host, path) = host_path.split_once(':').unwrap();
+        format!("https://{host}/{path}")
+    };
+    reqwest::Url::parse(&url).map_err(|_| bad_request("Invalid credential remote URL"))?;
+    // An unnamed URL must let Git's configured username and helpers select
+    // the account. Forcing Connect's static username hides existing named
+    // credentials, including those used for PRs from SSH repositories.
+    Ok(format!("url={url}\n\n"))
+}
+
 /// Read a saved credential back via `git credential fill` (non-interactive;
 /// never prompts). Returns `(username, password)`.
 async fn pr_credential(
     runner: &GitRunner,
     cwd: &std::path::Path,
-    host: &str,
+    remote_url: &str,
 ) -> Result<(String, String), AppError> {
-    let input = format!("protocol=https\nhost={host}\n\n");
+    let input = pr_credential_input(remote_url)?;
     let out = runner
         .run_with_stdin(
             cwd,
@@ -1676,8 +1701,7 @@ async fn core_pull_request_create(
     } else {
         check_pr_text(&request.description, "Description", 65536)?
     };
-    let host = raw_url_host(&raw_url).unwrap_or_default();
-    let (_username, password) = pr_credential(runner, cwd, &host).await?;
+    let (_username, password) = pr_credential(runner, cwd, &raw_url).await?;
     let endpoint = pr_endpoint(&coords);
     let payload = pr_request_json(coords.provider, &title, &description, &source, &target);
     let mut builder = http
@@ -1724,28 +1748,6 @@ async fn core_pull_request_create(
         url,
         reference,
     })
-}
-
-/// Host part of an HTTPS or SSH remote URL, lowercased.
-fn raw_url_host(remote_url: &str) -> Option<String> {
-    if let Some(after_at) = remote_url.split_once('@') {
-        let (host, _) = after_at.1.split_once(':')?;
-        if host.is_empty() {
-            return None;
-        }
-        return Some(host.to_ascii_lowercase());
-    }
-    let (_, rest) = remote_url.split_once("://")?;
-    let rest = rest
-        .rsplit_once('@')
-        .map(|(_, after)| after)
-        .unwrap_or(rest);
-    let authority = rest.split('/').next().unwrap_or("");
-    let host = authority.split(':').next().unwrap_or("");
-    if host.is_empty() {
-        return None;
-    }
-    Some(host.to_ascii_lowercase())
 }
 
 /// Create a pull (merge) request on the hosting provider. External write:
@@ -2215,6 +2217,12 @@ mod tests {
         assert!(filled.success);
         let output = String::from_utf8(filled.stdout).expect("credential output");
         assert!(output.contains("password=fixture-token-456\n"));
+        assert_eq!(
+            pr_credential(&runner, &root, "https://bitbucket.org/acme/widgets.git")
+                .await
+                .unwrap(),
+            (BITBUCKET_STATIC_USERNAME.into(), "fixture-token-456".into()),
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2487,6 +2495,154 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pr_named_bitbucket_remote_uses_its_saved_account_and_path() {
+        let (root, repo) = temp_repo(&format!("pr-named-{}", uuid::Uuid::new_v4()));
+        let helper = format!("store --file={}", root.join("credentials").display());
+        git(&repo, &["config", "credential.helper", ""]);
+        git(&repo, &["config", "--add", "credential.helper", &helper]);
+        git(&repo, &["config", "credential.useHttpPath", "true"]);
+        let runner = git_runner().unwrap();
+        let remote = "https://fixture-user@bitbucket.org/acme/widgets.git";
+        let approved = runner
+            .run_with_stdin(
+                &repo,
+                &["credential", "approve"],
+                b"url=https://fixture-user@bitbucket.org/acme/widgets.git\npassword=fixture-token\n\n",
+                crate::git::WRITE_TIMEOUT,
+            )
+            .await
+            .unwrap();
+        assert!(approved.success);
+        let credential = pr_credential(&runner, &repo, remote)
+            .await
+            .expect("named HTTPS remote must find its saved credential");
+        assert_eq!(credential, ("fixture-user".into(), "fixture-token".into()));
+        git(&repo, &["config", "--replace-all", "credential.helper", ""]);
+        git(
+            &repo,
+            &[
+                "config",
+                "credential.https://fixture-user@bitbucket.org/acme/widgets.git.helper",
+                &helper,
+            ],
+        );
+        assert_eq!(
+            pr_credential(&runner, &repo, remote).await.unwrap(),
+            credential
+        );
+        for remote in [
+            "https://other-user@bitbucket.org/acme/widgets.git",
+            "https://fixture-user@bitbucket.org/acme/other.git",
+            "https://fixture-user@bitbucket.org:8443/acme/widgets.git",
+        ] {
+            let error = pr_credential(&runner, &repo, remote).await.unwrap_err();
+            assert_eq!(error.code, ErrorCode::AUTH_REQUIRED);
+            assert!(!error.message.contains("fixture-token"));
+            assert!(!error.message.contains("fixture-user"));
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn pr_credential_input_preserves_https_and_maps_ssh_without_its_login() {
+        assert_eq!(
+            pr_credential_input("https://octo@github.com:443/acme/widgets.git").unwrap(),
+            "url=https://octo@github.com:443/acme/widgets.git\n\n",
+        );
+        assert_eq!(
+            pr_credential_input("git@github.com:acme/widgets.git").unwrap(),
+            "url=https://github.com/acme/widgets.git\n\n",
+        );
+        assert_eq!(
+            pr_credential_input("https://bitbucket.org/acme/widgets.git").unwrap(),
+            "url=https://bitbucket.org/acme/widgets.git\n\n",
+        );
+        for remote in [
+            "https://octo@github.com/acme/widgets.git\nusername=other",
+            "https://octo:secret@github.com/acme/widgets.git",
+            "http://github.com/acme/widgets.git",
+            "https://unknown.example/acme/widgets.git",
+        ] {
+            assert!(pr_credential_input(remote).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn pr_ssh_bitbucket_remote_uses_the_helpers_named_account() {
+        let (root, repo) = temp_repo(&format!("pr-ssh-account-{}", uuid::Uuid::new_v4()));
+        let helper = format!("store --file={}", root.join("credentials").display());
+        git(&repo, &["config", "credential.helper", ""]);
+        git(&repo, &["config", "--add", "credential.helper", &helper]);
+        git(&repo, &["config", "credential.useHttpPath", "false"]);
+        let runner = git_runner().unwrap();
+        let approved = runner
+            .run_with_stdin(
+                &repo,
+                &["credential", "approve"],
+                b"url=https://saved-user@bitbucket.org/acme/auth.git\npassword=fixture-named-token\n\n",
+                crate::git::WRITE_TIMEOUT,
+            )
+            .await
+            .unwrap();
+        assert!(approved.success);
+        for remote in [
+            "git@bitbucket.org:acme/auth.git",
+            "https://bitbucket.org/acme/auth.git",
+        ] {
+            assert_eq!(
+                pr_credential(&runner, &repo, remote).await.unwrap(),
+                ("saved-user".into(), "fixture-named-token".into()),
+            );
+        }
+        let approved = runner
+            .run_with_stdin(
+                &repo,
+                &["credential", "approve"],
+                b"url=https://configured-user@bitbucket.org/acme/auth.git\npassword=fixture-configured-token\n\n",
+                crate::git::WRITE_TIMEOUT,
+            )
+            .await
+            .unwrap();
+        assert!(approved.success);
+        git(
+            &repo,
+            &[
+                "config",
+                "credential.https://bitbucket.org.username",
+                "saved-user",
+            ],
+        );
+        assert_eq!(
+            pr_credential(&runner, &repo, "git@bitbucket.org:acme/auth.git")
+                .await
+                .unwrap(),
+            ("saved-user".into(), "fixture-named-token".into()),
+        );
+        git(
+            &repo,
+            &[
+                "config",
+                "credential.https://bitbucket.org.username",
+                "configured-user",
+            ],
+        );
+        assert_eq!(
+            pr_credential(&runner, &repo, "git@bitbucket.org:acme/auth.git")
+                .await
+                .unwrap(),
+            ("configured-user".into(), "fixture-configured-token".into()),
+        );
+        assert!(pr_credential(
+            &runner,
+            &repo,
+            "https://missing-user@bitbucket.org/acme/auth.git"
+        )
+        .await
+        .is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn pr_credential_fill_reads_an_isolated_helper_entry() {
         use std::process::Command as StdCommand;
 
@@ -2523,86 +2679,179 @@ mod tests {
             .expect("approve credential");
         assert!(approved.success);
 
-        let (username, password) = pr_credential(&runner, &root, "github.com")
-            .await
-            .expect("fill credential");
+        let (username, password) =
+            pr_credential(&runner, &root, "https://github.com/acme/widgets.git")
+                .await
+                .expect("fill credential");
         assert_eq!(username, "octo");
         assert_eq!(password, "fixture-pat-123");
-        assert!(pr_credential(&runner, &root, "unknown.example")
-            .await
-            .is_err());
+        assert_eq!(
+            pr_credential(&runner, &root, "git@github.com:acme/widgets.git")
+                .await
+                .unwrap(),
+            (username, password),
+        );
+        assert!(
+            pr_credential(&runner, &root, "https://gitlab.com/missing/widgets.git")
+                .await
+                .is_err()
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// End-to-end POST against a loopback stub: asserts method, path, auth
-    /// header and payload, then serves a canned provider response.
+    /// Exercise remote selection, credential lookup, and provider POST together.
     #[tokio::test]
-    async fn pr_create_posts_github_shape_to_a_stub_server() {
+    async fn pr_create_uses_scoped_credentials_and_posts_to_each_provider() {
         use std::io::{Read, Write};
-        use std::sync::{Arc, Mutex};
 
-        let seen = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let seen_server = Arc::clone(&seen);
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback stub listener");
-        let port = listener.local_addr().expect("stub port").port();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("stub accept");
-            let mut buffer = vec![0u8; 8192];
-            let read = stream.read(&mut buffer).expect("stub read");
-            seen_server
-                .lock()
-                .expect("stub lock")
-                .extend_from_slice(&buffer[..read]);
-            let body = r#"{"html_url":"https://github.com/acme/widgets/pull/7","number":7}"#;
-            let response = format!(
-                "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
+        for (remote, endpoint, body, reference, auth) in [
+            (
+                "https://octo@github.com/acme/widgets.git",
+                "/repos/acme/widgets/pulls",
+                r#"{"html_url":"https://github.com/acme/widgets/pull/7","number":7}"#,
+                "#7",
+                "authorization: Bearer fixture-pat-123",
+            ),
+            (
+                "https://fixture-user@bitbucket.org/acme/widgets.git",
+                "/repositories/acme/widgets/pullrequests",
+                r#"{"links":{"html":{"href":"https://bitbucket.org/acme/widgets/pull-requests/7"}},"id":7}"#,
+                "#7",
+                "authorization: Bearer fixture-pat-123",
+            ),
+            (
+                "git@bitbucket.org:acme/widgets.git",
+                "/repositories/acme/widgets/pullrequests",
+                r#"{"links":{"html":{"href":"https://bitbucket.org/acme/widgets/pull-requests/7"}},"id":7}"#,
+                "#7",
+                "authorization: Bearer fixture-pat-123",
+            ),
+            (
+                "https://octo@gitlab.com/acme/widgets.git",
+                "/projects/acme%2Fwidgets/merge_requests",
+                r#"{"web_url":"https://gitlab.com/acme/widgets/-/merge_requests/7","iid":7}"#,
+                "!7",
+                "private-token: fixture-pat-123",
+            ),
+        ] {
+            let (root, repo) = temp_repo(&format!("pr-post-{}", uuid::Uuid::new_v4()));
+            let helper = format!("store --file={}", root.join("credentials").display());
+            git(&repo, &["config", "credential.helper", ""]);
+            git(&repo, &["config", "--add", "credential.helper", &helper]);
+            git(&repo, &["config", "credential.useHttpPath", "true"]);
+            git(&repo, &["remote", "add", "selected", remote]);
+            git(
+                &repo,
+                &[
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/wrong/repo.git",
+                ],
             );
-            stream.write_all(response.as_bytes()).expect("stub write");
-        });
-
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .expect("stub http client");
-        let coords = PrCoords {
-            provider: PrProvider::GitHub,
-            api_base: format!("http://127.0.0.1:{port}"),
-            namespace: "acme".to_string(),
-            repo: "widgets".to_string(),
-        };
-        let endpoint = pr_endpoint(&coords);
-        assert_eq!(
-            endpoint,
-            format!("http://127.0.0.1:{port}/repos/acme/widgets/pulls")
-        );
-        let response = http
-            .post(&endpoint)
-            .header("User-Agent", "Octopus/0.1")
-            .header("Accept", "application/json")
-            .bearer_auth("fixture-pat-123")
-            .json(&pr_request_json(
-                PrProvider::GitHub,
-                "T",
-                "D",
-                "feat",
-                "main",
-            ))
-            .send()
+            let runner = git_runner().unwrap();
+            let credential_url = if remote.starts_with("git@") {
+                "https://fixture-user@bitbucket.org/acme/widgets.git"
+            } else {
+                remote
+            };
+            let approved = runner
+                .run_with_stdin(
+                    &repo,
+                    &["credential", "approve"],
+                    format!("url={credential_url}\npassword=fixture-pat-123\n\n").as_bytes(),
+                    crate::git::WRITE_TIMEOUT,
+                )
+                .await
+                .unwrap();
+            assert!(approved.success);
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback stub");
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = std::thread::spawn(move || {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(std::time::Instant::now() < deadline, "POST did not arrive");
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        Err(e) => panic!("stub accept: {e}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .unwrap();
+                let mut raw = Vec::new();
+                let mut buffer = [0u8; 4096];
+                loop {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0, "incomplete request");
+                    raw.extend_from_slice(&buffer[..count]);
+                    assert!(raw.len() < 65536);
+                    if let Some(end) = raw.windows(4).position(|part| part == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&raw[..end]);
+                        let length: usize = headers
+                            .lines()
+                            .find_map(|line| {
+                                line.to_ascii_lowercase()
+                                    .strip_prefix("content-length: ")
+                                    .map(|value| value.parse().unwrap())
+                            })
+                            .unwrap();
+                        if raw.len() >= end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                let response = format!(
+                    "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(), body,
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                String::from_utf8(raw).unwrap()
+            });
+            let mut registry = RepoRegistry::default();
+            let repo_id = open_repo(&mut registry, &repo, TrustState::Trusted);
+            let request = PullRequestCreateRequest {
+                request_id: "pr-test".into(),
+                expected_version: registry.get(&repo_id).unwrap().version,
+                repo_id,
+                remote: Some("selected".into()),
+                source_branch: "feat".into(),
+                target_branch: "main".into(),
+                title: "T".into(),
+                description: "D".into(),
+            };
+            let http = reqwest::Client::builder()
+                .no_proxy()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap();
+            let result = core_pull_request_create(
+                &runner,
+                &registry,
+                &http,
+                Some(&format!("http://127.0.0.1:{port}")),
+                &request,
+                &repo,
+            )
             .await
-            .expect("stub post");
-        assert_eq!(response.status(), reqwest::StatusCode::CREATED);
-        let body = response.bytes().await.expect("stub body");
-        let (url, reference) = pr_parse_response(PrProvider::GitHub, &body).expect("stub parse");
-        assert_eq!(url, "https://github.com/acme/widgets/pull/7");
-        assert_eq!(reference, "#7");
-        server.join().expect("stub server");
-        let raw = String::from_utf8(seen.lock().expect("stub lock").clone()).expect("stub text");
-        assert!(raw.starts_with("POST /repos/acme/widgets/pulls HTTP/1.1"));
-        assert!(raw.contains("authorization: Bearer fixture-pat-123"));
-        assert!(!raw.to_lowercase().contains("password"));
-        assert!(raw.contains(r#""head":"feat""#));
+            .expect("create PR through credential lookup");
+            assert_eq!(result.reference, reference);
+            let raw = server.join().unwrap();
+            assert!(raw.starts_with(&format!("POST {endpoint} HTTP/1.1")));
+            assert!(raw.contains(auth));
+            let payload: serde_json::Value =
+                serde_json::from_str(raw.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let coords = detect_pr_provider(remote).unwrap();
+            assert_eq!(
+                payload,
+                pr_request_json(coords.provider, "T", "D", "feat", "main")
+            );
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 
     #[test]
